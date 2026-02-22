@@ -19,7 +19,7 @@ source.include_exts = py,png,jpg,kv,atlas,txt
 version = 1.0.0
 
 # (list) Requirements - Python packages (ВАЖНО: разделяются запятыми)
-requirements = python3,kivy==2.1.0,opencv-python-headless==4.5.5.64,numpy==1.22.4,pillow==9.5.0,pyzbar==0.1.9,gtts==2.3.1,playsound==1.2.2,android
+requirements = python3,kivy==2.1.0,opencv-python-headless==4.5.5.64,numpy==1.19.5,pillow==9.5.0,pyzbar==0.1.9,gtts==2.3.1,playsound==1.2.2,android,android_numpy
 
 # (str) Orientation of the app (portrait, landscape, etc.)
 orientation = portrait
