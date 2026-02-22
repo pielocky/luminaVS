@@ -6,7 +6,7 @@ source.dir = .
 version = 1.0.0
 
 # Критически важно: правильные версии для Android
-requirements = python3,kivy==2.1.0,numpy==1.19.5,opencv-python-headless==4.5.5.64,pillow==9.5.0,pyzbar==0.1.9,gtts==2.3.1,playsound==1.2.2,android
+requirements = python3,kivy==2.1.0,numpy==1.19.5,opencv-python-headless==4.5.5.64,pillow==9.5.0,pyzbar==0.1.9,gtts==2.3.1,playsound==1.2.2,android, android_numpy
 
 orientation = portrait
 fullscreen = 0
