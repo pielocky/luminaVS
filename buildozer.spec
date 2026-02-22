@@ -1,61 +1,61 @@
 [app]
-# Заголовок приложения
-title = LuminaVS
+# (str) Title of your application
+title = Vision Assist
 
-# Имя пакета (должно быть уникальным)
-package.name = luminavision
+# (str) Package name (unique identifier)
+package.name = visionassist
 
-# Домен пакета (обычно ваш сайт или github)
+# (str) Package domain (usually your website or GitHub)
 package.domain = org.example
 
-# Исходная директория
+# (str) Source directory where your main.py is
 source.dir = .
 
-# Расширения файлов для включения
+# (str) Version of your app
+version = 1.0.0
+
+# (list) Source files to include
 source.include_exts = py,png,jpg,kv,atlas,txt
 
-# Версия приложения
-version = 0.1
+# (list) Requirements (Python packages)
+requirements = python3,kivy==2.1.0,opencv-python-headless==4.5.5.64,numpy==1.22.4,pillow==9.5.0,pyzbar==0.1.9,gtts==2.3.1,playsound==1.2.2,android
 
-# Требования (зависимости)
-requirements = python3,kivy
-
-# Ориентация экрана
+# (str) Orientation of the app
 orientation = portrait
 
-# Полноэкранный режим
+# (bool) Full screen mode
 fullscreen = 0
 
-# Иконка приложения (если есть)
-# icon.filename = %(source.dir)s/icon.png
+# (list) Android permissions
+android.permissions = CAMERA, INTERNET
 
-# Разрешения (что приложение может делать)
-android.permissions = INTERNET
-
-# Минимальная версия Android
+# (int) Android minimum API level
 android.minapi = 21
 
-# Целевая версия Android
+# (int) Android target API level
 android.api = 30
 
-# Версия SDK
-android.sdk = 30
-
-# Версия NDK
+# (str) Android NDK version
 android.ndk = 23b
 
-# Включить Java (если нужно)
-# android.add_src =
+# (int) Android SDK version
+android.sdk = 30
 
-# Цвета приложения
+# (bool) Accept SDK license
 android.accept_sdk_license = True
 
-# Архитектуры для сборки
-android.archs = arm64-v8a, armeabi-v7a
+# (list) Android architectures to build for
+android.archs = arm64-v8a
 
 [buildozer]
-# Уровень логирования
+# (int) Log level (0-2)
 log_level = 2
 
-# Предупреждения при запуске от root
+# (bool) Warn when running as root
 warn_on_root = 1
+
+# (str) Path to build directory
+build_dir = ./.buildozer/
+
+# (str) Path to bin directory
+bin_dir = ./bin/
