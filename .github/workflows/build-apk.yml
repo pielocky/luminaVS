@@ -1,13 +1,14 @@
-name: Diagnostic Build
+name: Debug Build
 
-on: 
+on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:    # Позволяет запускать вручную
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  diagnose:
+  debug:
     runs-on: ubuntu-latest
+    
     steps:
       - uses: actions/checkout@v4
       
@@ -21,59 +22,22 @@ jobs:
           pip install --user buildozer cython
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       
-      - name: Check environment
-        run: |
-          python --version
-          pip list
-          java -version
-          buildozer --version
-      
       - name: Check files
         run: |
+          echo "=== Current directory ==="
+          pwd
+          echo "=== All files ==="
           ls -la
           echo "=== buildozer.spec content ==="
           cat buildozer.spec
-          echo "=== main.py first 20 lines ==="
-          head -20 main.py || echo "main.py not found"
       
-      - name: Try minimal build
+      - name: Try build with verbose output
         run: |
-          # Сохраняем оригинал
-          cp buildozer.spec buildozer.spec.original
-          
-          # Создаем минимальный конфиг для теста
-          cat > buildozer.spec.minimal << EOF
-          [app]
-          title = Minimal Test
-          package.name = minimal
-          package.domain = org.test
-          requirements = python3,kivy
-          orientation = portrait
-          
-          android.api = 30
-          android.minapi = 21
-          android.ndk = 23b
-          android.sdk = 30
-          
-          [buildozer]
-          log_level = 2
-          EOF
-          
-          # Используем минимальный конфиг
-          cp buildozer.spec.minimal buildozer.spec
-          
-          # Пытаемся собрать
-          export PATH=$PATH:~/.local/bin/
           buildozer android debug 2>&1 | tee build.log || true
-      
-      - name: Upload build log
+          
+      - name: Upload full log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostic-build-log
+          name: full-build-log
           path: build.log
-      
-      - name: Restore original spec
-        if: always()
-        run: |
-          cp buildozer.spec.original buildozer.spec || true
