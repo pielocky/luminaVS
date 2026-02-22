@@ -36,13 +36,13 @@ android.permissions = INTERNET
 android.minapi = 21
 
 # Целевая версия Android
-android.api = 31
+android.api = 30
 
 # Версия SDK
-android.sdk = 33
+android.sdk = 30
 
 # Версия NDK
-android.ndk = 25b
+android.ndk = 23b
 
 # Включить Java (если нужно)
 # android.add_src =
