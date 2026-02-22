@@ -1,88 +1,79 @@
-name: Build Android APK with Buildozer
+name: Diagnostic Build
 
-# Запускать при пуше в main ветку
-on:
+on: 
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  # Возможность ручного запуска
-  workflow_dispatch:
+    branches: [ main, master ]
+  workflow_dispatch:    # Позволяет запускать вручную
 
 jobs:
-  build:
+  diagnose:
     runs-on: ubuntu-latest
-    
     steps:
-      # Клонирование репозитория
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
-      # Установка зависимостей для Buildozer
-      - name: Install Buildozer dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            git \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            python3-pip \
-            autoconf \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            libtinfo6 \
-            cmake \
-            libffi-dev \
-            libssl-dev \
-            libltdl-dev \
-            ccache
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
       
-      # Установка Python зависимостей
-      - name: Install Python dependencies
+      - name: Install buildozer
         run: |
-          python3 -m pip install --upgrade pip
           pip install --user buildozer cython
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       
-      # Кэширование Buildozer (для ускорения последующих сборок)
-      - name: Cache Buildozer
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.buildozer
-            ~/.cache/pip
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            ${{ runner.os }}-buildozer-
-      
-      # Сборка APK
-      - name: Build with Buildozer
+      - name: Check environment
         run: |
-          export PATH=$PATH:~/.local/bin/
-          # Создаем директорию для .buildozer если её нет
-          mkdir -p ~/.buildozer
-          # Запускаем сборку
-          buildozer android debug
-        env:
-          # Отключаем интерактивный режим
-          BUILDOZER_INTERACTIVE: false
+          python --version
+          pip list
+          java -version
+          buildozer --version
       
-      # Загрузка APK как артефакта
-      - name: Upload APK
+      - name: Check files
+        run: |
+          ls -la
+          echo "=== buildozer.spec content ==="
+          cat buildozer.spec
+          echo "=== main.py first 20 lines ==="
+          head -20 main.py || echo "main.py not found"
+      
+      - name: Try minimal build
+        run: |
+          # Сохраняем оригинал
+          cp buildozer.spec buildozer.spec.original
+          
+          # Создаем минимальный конфиг для теста
+          cat > buildozer.spec.minimal << EOF
+          [app]
+          title = Minimal Test
+          package.name = minimal
+          package.domain = org.test
+          requirements = python3,kivy
+          orientation = portrait
+          
+          android.api = 30
+          android.minapi = 21
+          android.ndk = 23b
+          android.sdk = 30
+          
+          [buildozer]
+          log_level = 2
+          EOF
+          
+          # Используем минимальный конфиг
+          cp buildozer.spec.minimal buildozer.spec
+          
+          # Пытаемся собрать
+          export PATH=$PATH:~/.local/bin/
+          buildozer android debug 2>&1 | tee build.log || true
+      
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: my-python-app-apk
-          path: bin/*.apk
-          # Сколько дней хранить артефакт
-          retention-days: 30
+          name: diagnostic-build-log
+          path: build.log
       
-      # Создание релиза (опционально)
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: bin/*.apk
+      - name: Restore original spec
+        if: always()
+        run: |
+          cp buildozer.spec.original buildozer.spec || true
