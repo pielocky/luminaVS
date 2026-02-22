@@ -1,4 +1,4 @@
-name: Debug Build
+name: Build APK with OpenCV and NumPy
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  debug:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-20.04  # Важно: используем старую Ubuntu
     
     steps:
       - uses: actions/checkout@v4
@@ -17,27 +17,56 @@ jobs:
         with:
           python-version: '3.8'
       
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            python3-pip \
+            python3-dev \
+            git \
+            zip \
+            unzip \
+            openjdk-11-jdk \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            libltdl-dev \
+            ccache \
+            ninja-build \
+            libatlas-base-dev \
+            libblas-dev \
+            liblapack-dev \
+            gfortran
+      
       - name: Install buildozer
         run: |
-          pip install --user buildozer cython
+          pip install --user --upgrade buildozer cython
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       
-      - name: Check files
+      - name: Clean cache
         run: |
-          echo "=== Current directory ==="
-          pwd
-          echo "=== All files ==="
-          ls -la
-          echo "=== buildozer.spec content ==="
-          cat buildozer.spec
+          rm -rf ~/.buildozer
+          rm -rf .buildozer
+          rm -rf ~/.cache/pip
+          rm -rf ~/.local/share/python-for-android
       
-      - name: Try build with verbose output
+      - name: Build APK
         run: |
-          buildozer android debug 2>&1 | tee build.log || true
-          
-      - name: Upload full log
-        if: always()
+          export PATH=$PATH:~/.local/bin/
+          export CFLAGS="-O2"
+          export CXXFLAGS="-O2"
+          buildozer android debug
+        env:
+          BUILDOZER_INTERACTIVE: false
+      
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: full-build-log
-          path: build.log
+          name: vision-assist-with-numpy-opencv
+          path: bin/*.apk
