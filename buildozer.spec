@@ -37,7 +37,7 @@ android.minapi = 21
 android.api = 30
 
 # (str) Android NDK version
-android.ndk = 23b
+android.ndk = 25b
 
 # (int) Android SDK version
 android.sdk = 30
