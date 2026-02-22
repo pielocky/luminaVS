@@ -1,7 +1,7 @@
 # Основные зависимости
 kivy==2.1.0
 opencv-python==4.8.1.78
-numpy==1.24.3
+numpy==1.21.6
 easyocr==1.7.1
 pillow==10.0.0
 pyzbar==0.1.9
