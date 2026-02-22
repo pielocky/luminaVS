@@ -1,0 +1,88 @@
+name: Build Android APK with Buildozer
+
+# Запускать при пуше в main ветку
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # Возможность ручного запуска
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Клонирование репозитория
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Установка зависимостей для Buildozer
+      - name: Install Buildozer dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            libltdl-dev \
+            ccache
+      
+      # Установка Python зависимостей
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install --user buildozer cython
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      # Кэширование Buildozer (для ускорения последующих сборок)
+      - name: Cache Buildozer
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.buildozer
+            ~/.cache/pip
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+      
+      # Сборка APK
+      - name: Build with Buildozer
+        run: |
+          export PATH=$PATH:~/.local/bin/
+          # Создаем директорию для .buildozer если её нет
+          mkdir -p ~/.buildozer
+          # Запускаем сборку
+          buildozer android debug
+        env:
+          # Отключаем интерактивный режим
+          BUILDOZER_INTERACTIVE: false
+      
+      # Загрузка APK как артефакта
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: my-python-app-apk
+          path: bin/*.apk
+          # Сколько дней хранить артефакт
+          retention-days: 30
+      
+      # Создание релиза (опционально)
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: bin/*.apk
