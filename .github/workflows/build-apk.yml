@@ -25,11 +25,8 @@ jobs:
           pip install buildozer cython
       - name: Install additional build dependencies
         run: sudo apt install -y libgl1-mesa-dev libgles2-mesa-dev
-      - name: Cache Buildozer
-        uses: actions/cache@v3
-        with:
-          path: ~/.buildozer
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+      - name: Clean Buildozer cache (to force fresh install)
+        run: rm -rf ~/.buildozer
       - name: Build with Buildozer
         env:
           AUTOPOINT: 'true'
@@ -37,7 +34,7 @@ jobs:
           mkdir -p templates
           buildozer android debug
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: vision-assist-apk
           path: bin/*.apk

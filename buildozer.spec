@@ -9,8 +9,8 @@ source.exclude_exts = spec
 source.inclusions = ./templates
 version = 0.1
 
-# Пакеты без жёстких версий для совместимости с p4a
-requirements = python3,kivy==2.1.0,opencv,numpy,pyzbar,gtts,android,Pillow
+# Обязательно включаем pyjnius и cython для корректной сборки
+requirements = python3,kivy==2.1.0,opencv,numpy,pyzbar,gtts,android,Pillow,pyjnius==1.5.0,cython
 
 orientation = portrait
 fullscreen = 0
