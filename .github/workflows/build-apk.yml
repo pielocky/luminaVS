@@ -32,12 +32,12 @@ jobs:
           key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
       - name: Build with Buildozer
         env:
-          AUTOPOINT: 'true'  # помогает autoreconf
+          AUTOPOINT: 'true'
         run: |
           mkdir -p templates
           buildozer android debug
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: vision-assist-apk
           path: bin/*.apk
