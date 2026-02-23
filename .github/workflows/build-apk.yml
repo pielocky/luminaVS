@@ -5,11 +5,11 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # позволяет запускать вручную
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04   # изменено на 22.04 LTS
 
     steps:
       - name: Checkout code
@@ -27,10 +27,8 @@ jobs:
           pip install --upgrade pip
           pip install buildozer cython
 
-      - name: Install Android SDK dependencies
+      - name: Install additional build dependencies
         run: |
-          sudo apt install -y libc6:i386 libncurses5:i386 libstdc++6:i386 lib32z1 libbz2-1.0:i386
-          # Устанавливаем дополнительные пакеты для сборки opencv и других
           sudo apt install -y libgl1-mesa-dev libgles2-mesa-dev
 
       - name: Cache Buildozer dependencies
@@ -43,9 +41,7 @@ jobs:
 
       - name: Build with Buildozer
         run: |
-          # Создаём директорию templates, если её нет (чтобы избежать ошибок при сборке)
           mkdir -p templates
-          # Запускаем сборку (первый раз скачает всё необходимое, может занять >30 мин)
           buildozer android debug
 
       - name: Upload APK artifact
