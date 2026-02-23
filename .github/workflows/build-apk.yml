@@ -30,38 +30,117 @@ jobs:
           pip install --upgrade pip
           pip install buildozer cython pillow
 
-      - name: Setup Android SDK/NDK
+      - name: Download Android SDK and NDK from official sources
         run: |
-          # Скачиваем Android SDK и NDK с российских зеркал
+          # Создаем директорию для Android платформы
           mkdir -p ~/.buildozer/android/platform
           cd ~/.buildozer/android/platform
           
-          # Скачиваем NDK r25b
-          wget https://mirror.yandex.ru/android/ndk/android-ndk-r25b-linux.zip
-          unzip -q android-ndk-r25b-linux.zip
-          mv android-ndk-r25b android-ndk
+          # Скачиваем NDK r25b с официального источника (работает в России)
+          echo "Скачиваем Android NDK r25b..."
+          wget --timeout=30 --tries=3 https://dl.google.com/android/repository/android-ndk-r25b-linux.zip || \
+          wget --timeout=30 --tries=3 https://github.com/android/ndk/releases/download/r25b/android-ndk-r25b-linux.zip
           
-          # Скачиваем SDK
-          wget https://mirror.yandex.ru/android/sdk-tools-linux-4333796.zip
-          unzip -q sdk-tools-linux-4333796.zip -d android-sdk
+          if [ -f "android-ndk-r25b-linux.zip" ]; then
+            echo "NDK скачан успешно"
+            unzip -q android-ndk-r25b-linux.zip
+            mv android-ndk-r25b android-ndk
+          else
+            echo "Ошибка скачивания NDK"
+            exit 1
+          fi
+          
+          # Скачиваем SDK command line tools
+          echo "Скачиваем Android SDK command line tools..."
+          wget --timeout=30 --tries=3 https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip || \
+          wget --timeout=30 --tries=3 https://mirror.yandex.ru/android/repository/commandlinetools-linux-9477386_latest.zip
+          
+          if [ -f "commandlinetools-linux-9477386_latest.zip" ]; then
+            echo "SDK tools скачаны успешно"
+            mkdir -p android-sdk
+            unzip -q commandlinetools-linux-9477386_latest.zip -d android-sdk/cmdline-tools
+            mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
+          else
+            echo "Ошибка скачивания SDK tools"
+            exit 1
+          fi
 
-      - name: Pre-download numpy
+      - name: Setup Android SDK components
+        run: |
+          # Устанавливаем переменные окружения
+          export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          
+          # Принимаем лицензии
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          
+          # Устанавливаем необходимые SDK компоненты
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-30" "build-tools;30.0.3"
+
+      - name: Pre-download numpy from Russian mirror
         run: |
           # Создаем директорию для numpy
           mkdir -p ~/.buildozer/android/packages/numpy/
           
-          # Скачиваем numpy с Яндекс зеркала
-          wget https://mirror.yandex.ru/pypi/packages/source/n/numpy/numpy-1.23.5.tar.gz \
+          # Скачиваем numpy с Яндекс зеркала (для Python пакетов)
+          echo "Скачиваем numpy с Яндекс зеркала..."
+          wget --timeout=30 --tries=3 https://mirror.yandex.ru/pypi/packages/source/n/numpy/numpy-1.23.5.tar.gz \
+               -O ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz || \
+          wget --timeout=30 --tries=3 https://pypi.org/packages/source/n/numpy/numpy-1.23.5.tar.gz \
                -O ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz
           
-          # Создаем маркерный файл
-          touch ~/.buildozer/android/packages/numpy/.mark-numpy-1.23.5.tar.gz
+          if [ -f ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz ]; then
+            echo "numpy скачан успешно"
+            # Создаем маркерный файл
+            touch ~/.buildozer/android/packages/numpy/.mark-numpy-1.23.5.tar.gz
+          else
+            echo "Ошибка скачивания numpy"
+            exit 1
+          fi
+
+      - name: Create custom numpy recipe
+        run: |
+          # Создаем кастомный рецепт для numpy
+          mkdir -p ~/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/
+          
+          cat > ~/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/__init__.py << 'EOF'
+from pythonforandroid.recipe import PythonRecipe
+import shutil
+import os
+from pythonforandroid.logger import info
+
+class NumpyRecipe(PythonRecipe):
+    version = '1.23.5'
+    url = 'https://mirror.yandex.ru/pypi/packages/source/n/numpy/numpy-{version}.tar.gz'
+    depends = ['setuptools']
+    
+    def download_file(self, url, target, cwd=None):
+        cached_file = os.path.expanduser(f'~/.buildozer/android/packages/numpy/numpy-{self.version}.tar.gz')
+        if os.path.exists(cached_file):
+            info(f"Using cached numpy from {cached_file}")
+            shutil.copyfile(cached_file, target)
+            return True
+        else:
+            info(f"Downloading numpy from mirror")
+            super().download_file(url, target, cwd)
+
+recipe = NumpyRecipe()
+EOF
 
       - name: Build with buildozer
         run: |
-          # Настраиваем переменные окружения для использования российских зеркал
-          export PIP_INDEX_URL=https://mirror.yandex.ru/pypi/simple
-          export PIP_TRUSTED_HOST=mirror.yandex.ru
+          # Настраиваем переменные окружения
+          export ANDROID_HOME=~/.buildozer/android/platform/android-sdk
+          export ANDROID_NDK=~/.buildozer/android/platform/android-ndk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_NDK:$PATH
+          
+          # Настраиваем pip для использования российских зеркал
+          mkdir -p ~/.pip
+          cat > ~/.pip/pip.conf << EOF
+[global]
+index-url = https://mirror.yandex.ru/pypi/simple
+trusted-host = mirror.yandex.ru
+EOF
           
           # Запускаем сборку
           buildozer android debug
