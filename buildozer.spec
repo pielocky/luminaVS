@@ -18,8 +18,11 @@ source.include_exts = py,png,jpg,kv,atlas,txt,ttf
 # (list) Source files to exclude
 source.exclude_exts = spec
 
-# (list) List of inclusions to use
+# (list) List of inclusions to use (list of directories with files)
 source.inclusions = ./templates
+
+# (str) Application version
+version = 0.1
 
 # (list) Application requirements
 requirements = python3,kivy==2.1.0,opencv-python-headless==4.5.5.64,numpy==1.22.4,easyocr==1.6.2,pyzbar==0.1.9,gtts==2.3.1,playsound==1.3.0,android,Pillow==9.5.0
@@ -62,9 +65,6 @@ android.recipes = zbar
 
 # (bool) If True, then the APK will be debuggable (adb logcat works)
 android.debug = False
-
-# (str) The version name of the app
-android.version_name = 0.1
 
 # (int) The version code of the app
 android.version_code = 1
