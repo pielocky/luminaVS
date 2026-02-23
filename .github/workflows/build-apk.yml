@@ -1,72 +1,56 @@
-name: Build APK with OpenCV and NumPy
+name: Build Android APK
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # Важно: используем старую Ubuntu
+    runs-on: ubuntu-20.04  # Важно: используем Ubuntu 20.04
     
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            python3-pip \
-            python3-dev \
-            git \
-            zip \
-            unzip \
-            openjdk-11-jdk \
-            autoconf \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            cmake \
-            libffi-dev \
-            libssl-dev \
-            libltdl-dev \
-            ccache \
-            ninja-build \
-            libatlas-base-dev \
-            libblas-dev \
-            liblapack-dev \
-            gfortran
-      
-      - name: Install buildozer
-        run: |
-          pip install --user --upgrade buildozer cython
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-      
-      - name: Clean cache
-        run: |
-          rm -rf ~/.buildozer
-          rm -rf .buildozer
-          rm -rf ~/.cache/pip
-          rm -rf ~/.local/share/python-for-android
-      
-      - name: Build APK
-        run: |
-          export PATH=$PATH:~/.local/bin/
-          export CFLAGS="-O2"
-          export CXXFLAGS="-O2"
-          buildozer android debug
-        env:
-          BUILDOZER_INTERACTIVE: false
-      
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: vision-assist-with-numpy-opencv
-          path: bin/*.apk
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'  # Используем Python 3.9
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git \
+          wget \
+          unzip \
+          zip \
+          openjdk-11-jdk \
+          autoconf \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libtinfo5 \
+          cmake \
+          libffi-dev \
+          libssl-dev \
+          gettext  # Важно: устанавливаем gettext
+        
+    - name: Install Python packages
+      run: |
+        pip install --upgrade pip
+        pip install cython virtualenv
+        pip install buildozer
+        
+    - name: Build with Buildozer
+      run: |
+        buildozer android debug
+        
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: vision-assist-apk
+        path: bin/*.apk
