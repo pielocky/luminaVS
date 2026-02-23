@@ -17,9 +17,9 @@ android.permissions = CAMERA, INTERNET
 # Версии SDK/NDK - ЭТО КЛЮЧЕВОЕ!
 android.api = 30
 android.minapi = 21
-android.ndk = 23b
+android.ndk = 25b
 android.sdk = 30
-android.ndk_version = 23b
+android.ndk_version = 25b
 
 # Важные настройки для сборки
 android.accept_sdk_license = True
