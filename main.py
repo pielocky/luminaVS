@@ -18,10 +18,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.metrics import dp, sp
-from kivy.graphics import Color, Rectangle, RoundedRectangle
-from kivy.animation import Animation
-from kivy.properties import NumericProperty, StringProperty, ListProperty, BooleanProperty
-from kivy.uix.behaviors import ButtonBehavior
+from kivy.graphics import Color, RoundedRectangle
 from kivy.core.text import LabelBase, DEFAULT_FONT
 import tempfile
 from gtts import gTTS
@@ -32,119 +29,98 @@ import warnings
 from pyzbar.pyzbar import decode as zbar_decode
 from PIL import Image as PILImage
 import sys
+import gc
+from functools import lru_cache, partial
 
-# Альтернатива pygame - используем playsound если доступно
+# Оптимизация для Android
+if platform == 'android':
+    import android
+    from android.permissions import request_permissions, Permission
+    request_permissions([Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE, 
+                        Permission.READ_EXTERNAL_STORAGE])
+
+# Упрощенное воспроизведение звука для Android
+try:
+    from android.media import MediaPlayer
+    ANDROID_MEDIA = True
+except:
+    ANDROID_MEDIA = False
+
 try:
     from playsound import playsound
     PLAYSOUND_AVAILABLE = True
 except ImportError:
     PLAYSOUND_AVAILABLE = False
-    print("⚠️ playsound не установлен. Используйте: pip install playsound")
 
-warnings.filterwarnings('ignore', category=UserWarning, module='easyocr')
+warnings.filterwarnings('ignore')
 
-# Настройки для мобильных устройств
-if platform in ['android', 'ios']:
-    Window.softinput_mode = 'below_target'
-
-# Настройка шрифтов в зависимости от платформы
+# Настройки для Android
 if platform == 'android':
-    # На Android используем Roboto
+    Window.softinput_mode = 'below_target'
+    # Ограничиваем разрешение для производительности
+    MAX_FRAME_WIDTH = 480
+    MAX_FRAME_HEIGHT = 360
+else:
+    MAX_FRAME_WIDTH = 640
+    MAX_FRAME_HEIGHT = 480
+
+# Настройка шрифтов
+if platform == 'android':
     FONT_NAME = 'Roboto'
     FONT_LIGHT = 'Roboto'
     FONT_MEDIUM = 'Roboto'
-elif platform == 'ios':
-    # На iOS используем San Francisco или Helvetica
-    FONT_NAME = 'Helvetica'
-    FONT_LIGHT = 'Helvetica-Light'
-    FONT_MEDIUM = 'Helvetica-Bold'
-elif sys.platform == 'win32':
-    # На Windows используем Segoe UI или Arial
-    try:
-        # Пробуем зарегистрировать Segoe UI
-        LabelBase.register(name='SegoeUI', fn_regular='C:/Windows/Fonts/segoeui.ttf',
-                          fn_bold='C:/Windows/Fonts/segoeuib.ttf')
-        FONT_NAME = 'SegoeUI'
-        FONT_LIGHT = 'SegoeUI'
-        FONT_MEDIUM = 'SegoeUI'
-    except:
-        # Если не получилось, используем шрифт по умолчанию
-        FONT_NAME = DEFAULT_FONT
-        FONT_LIGHT = DEFAULT_FONT
-        FONT_MEDIUM = DEFAULT_FONT
-elif sys.platform == 'darwin':
-    # На macOS используем системные шрифты
-    FONT_NAME = '.AppleSystemUIFont'
-    FONT_LIGHT = '.AppleSystemUIFont'
-    FONT_MEDIUM = '.AppleSystemUIFont'
 else:
-    # На Linux используем шрифт по умолчанию
     FONT_NAME = DEFAULT_FONT
     FONT_LIGHT = DEFAULT_FONT
     FONT_MEDIUM = DEFAULT_FONT
 
-# Современная цветовая схема - бело-голубая
+# Оптимизированная цветовая схема
 COLORS = {
     'background': [0.98, 0.98, 1.0, 1],
     'surface': [1, 1, 1, 1],
-    
-    # Основные цвета
     'primary': [0.0, 0.6, 0.9, 1],
-    'primary_light': [0.2, 0.7, 1.0, 1],
     'primary_dark': [0.0, 0.4, 0.7, 1],
-    
     'success': [0.2, 0.8, 0.4, 1],
     'warning': [1.0, 0.6, 0.0, 1],
     'error': [1.0, 0.3, 0.3, 1],
     'purple': [0.6, 0.4, 0.9, 1],
     'gold': [1.0, 0.8, 0.2, 1],
-    
-    # Тень и границы
     'card_shadow': [0.0, 0.0, 0.0, 0.1],
     'card_border': [0.9, 0.95, 1.0, 1],
-    
-    # Текст
     'text_primary': [0.1, 0.2, 0.4, 1],
     'text_secondary': [0.4, 0.5, 0.7, 1],
     'text_on_primary': [1, 1, 1, 1],
-    'text_dark': [0.1, 0.1, 0.2, 1],
 }
 
 @dataclass(frozen=True)
 class AppConfig:
-    """Конфигурация приложения"""
     CAMERA_ID: int = 0
-    FPS: float = 1/30
+    FPS: float = 1/15  # Уменьшено для производительности
     OCR_CONFIDENCE_THRESHOLD: float = 0.3
     TEMPLATES_DIR: str = "templates"
     SUPPORTED_EXTENSIONS: tuple = ('.jpg', '.jpeg', '.png', '.bmp')
     
-    # Размеры
-    BUTTON_HEIGHT: float = dp(52)
-    BUTTON_HEIGHT_SMALL: float = dp(44)
-    FONT_SIZE: float = sp(16)
-    FONT_SIZE_SMALL: float = sp(14)
-    FONT_SIZE_LARGE: float = sp(18)
-    FONT_SIZE_HEADER: float = sp(22)
-    PADDING: float = dp(12)
-    PADDING_SMALL: float = dp(8)
-    SPACING: float = dp(10)
-    SPACING_SMALL: float = dp(5)
-    BORDER_RADIUS: float = dp(12)
-    CARD_ELEVATION: float = dp(2)
+    # Оптимизированные размеры для Android
+    BUTTON_HEIGHT: float = dp(48)
+    BUTTON_HEIGHT_SMALL: float = dp(40)
+    FONT_SIZE: float = sp(14)
+    FONT_SIZE_SMALL: float = sp(12)
+    FONT_SIZE_LARGE: float = sp(16)
+    FONT_SIZE_HEADER: float = sp(18)
+    PADDING: float = dp(8)
+    SPACING: float = dp(5)
+    BORDER_RADIUS: float = dp(8)
+    CARD_ELEVATION: float = dp(1)
 
 @dataclass
 class ObjectTemplate:
-    """Шаблон объекта"""
     name: str
     display_name: str
     threshold: float
     color: Tuple[int, int, int]
 
-# Упрощенная стилизованная кнопка на основе стандартной Button
+# Оптимизированная кнопка с кэшированием
 class StyledButton(Button):
-    """Стилизованная кнопка с градиентным эффектом"""
-    
     def __init__(self, color_type='primary', **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
@@ -152,57 +128,45 @@ class StyledButton(Button):
         self.font_size = AppConfig.FONT_SIZE
         self.bold = True
         self.font_name = FONT_MEDIUM
-        
-        # Убираем стандартный фон
         self.background_normal = ''
         self.background_down = ''
         self.background_color = [0, 0, 0, 0]
-        
-        # Цвет текста
         self.color = COLORS['text_on_primary']
-        
-        # Сохраняем тип цвета
         self.color_type = color_type
-        
-        # Обновляем градиент
+        self._cached_bg = None
         self.bind(pos=self._update_gradient, size=self._update_gradient)
     
     def _update_gradient(self, *args):
+        if self._cached_bg == (self.x, self.y, self.width, self.height, self.state):
+            return
+        self._cached_bg = (self.x, self.y, self.width, self.height, self.state)
+        
         self.canvas.before.clear()
         with self.canvas.before:
-            # Тень
             Color(*COLORS['card_shadow'])
             RoundedRectangle(pos=(self.x + AppConfig.CARD_ELEVATION, 
                                  self.y - AppConfig.CARD_ELEVATION),
                            size=self.size,
                            radius=[AppConfig.BORDER_RADIUS])
             
-            # Основной фон в зависимости от типа
-            if self.color_type == 'success':
-                Color(*COLORS['success'])
-            elif self.color_type == 'warning':
-                Color(*COLORS['warning'])
-            elif self.color_type == 'error':
-                Color(*COLORS['error'])
-            elif self.color_type == 'purple':
-                Color(*COLORS['purple'])
-            elif self.color_type == 'gold':
-                Color(*COLORS['gold'])
-            else:
-                Color(*COLORS['primary'])
+            color_map = {
+                'success': COLORS['success'],
+                'warning': COLORS['warning'],
+                'error': COLORS['error'],
+                'purple': COLORS['purple'],
+                'gold': COLORS['gold']
+            }
+            Color(*color_map.get(self.color_type, COLORS['primary']))
             
             RoundedRectangle(pos=self.pos, size=self.size,
                            radius=[AppConfig.BORDER_RADIUS])
             
-            # Эффект при нажатии
             if self.state == 'down':
                 Color(0, 0, 0, 0.1)
                 RoundedRectangle(pos=self.pos, size=self.size,
                                radius=[AppConfig.BORDER_RADIUS])
 
 class StyledToggleButton(ToggleButton):
-    """Стилизованная переключаемая кнопка"""
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
@@ -210,34 +174,28 @@ class StyledToggleButton(ToggleButton):
         self.font_size = AppConfig.FONT_SIZE
         self.bold = True
         self.font_name = FONT_MEDIUM
-        
-        # Убираем стандартный фон
         self.background_normal = ''
         self.background_down = ''
         self.background_color = [0, 0, 0, 0]
-        
-        # Цвет текста
         self.color = COLORS['text_on_primary']
-        
+        self._cached_bg = None
         self.bind(pos=self._update_gradient, size=self._update_gradient, 
                   state=self._update_state)
     
     def _update_gradient(self, *args):
+        if self._cached_bg == (self.x, self.y, self.width, self.height, self.state):
+            return
+        self._cached_bg = (self.x, self.y, self.width, self.height, self.state)
+        
         self.canvas.before.clear()
         with self.canvas.before:
-            # Тень
             Color(*COLORS['card_shadow'])
             RoundedRectangle(pos=(self.x + AppConfig.CARD_ELEVATION, 
                                  self.y - AppConfig.CARD_ELEVATION),
                            size=self.size,
                            radius=[AppConfig.BORDER_RADIUS])
             
-            # Основной фон
-            if self.state == 'down':
-                Color(*COLORS['primary_dark'])
-            else:
-                Color(*COLORS['primary'])
-            
+            Color(*COLORS['primary_dark'] if self.state == 'down' else COLORS['primary'])
             RoundedRectangle(pos=self.pos, size=self.size,
                            radius=[AppConfig.BORDER_RADIUS])
     
@@ -245,157 +203,162 @@ class StyledToggleButton(ToggleButton):
         self._update_gradient()
 
 class ModernCard(BoxLayout):
-    """Современная карточка с тенью"""
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.padding = AppConfig.PADDING
         self.spacing = AppConfig.SPACING
+        self._cached_rect = None
         self.bind(pos=self._update_rect, size=self._update_rect)
-        
+    
     def _update_rect(self, *args):
+        if self._cached_rect == (self.x, self.y, self.width, self.height):
+            return
+        self._cached_rect = (self.x, self.y, self.width, self.height)
+        
         self.canvas.before.clear()
         with self.canvas.before:
-            # Тень
             Color(*COLORS['card_shadow'])
             RoundedRectangle(pos=(self.x + AppConfig.CARD_ELEVATION, 
                                  self.y - AppConfig.CARD_ELEVATION),
                            size=self.size,
                            radius=[AppConfig.BORDER_RADIUS])
-            
-            # Основной фон
             Color(*COLORS['surface'])
             RoundedRectangle(pos=self.pos, size=self.size,
                            radius=[AppConfig.BORDER_RADIUS])
-            
-            # Легкая обводка
             Color(*COLORS['card_border'])
             RoundedRectangle(pos=self.pos, size=self.size,
-                           radius=[AppConfig.BORDER_RADIUS],
-                           line_width=1)
+                           radius=[AppConfig.BORDER_RADIUS], line_width=1)
 
 class ModernLabel(Label):
-    """Современный лейбл с красивым шрифтом"""
-    
     def __init__(self, variant='primary', **kwargs):
         super().__init__(**kwargs)
         self.halign = 'left'
         self.valign = 'top'
         self.text_size = (None, None)
         
-        # Настройки в зависимости от варианта
-        if variant == 'primary':
-            self.color = COLORS['text_primary']
-            self.font_size = AppConfig.FONT_SIZE_LARGE
-            self.bold = True
-            self.font_name = FONT_MEDIUM
-        elif variant == 'secondary':
-            self.color = COLORS['text_secondary']
-            self.font_size = AppConfig.FONT_SIZE_SMALL
-            self.font_name = FONT_LIGHT
-        elif variant == 'header':
-            self.color = COLORS['primary']
-            self.font_size = AppConfig.FONT_SIZE_HEADER
-            self.bold = True
-            self.font_name = FONT_MEDIUM
-        elif variant == 'success':
-            self.color = COLORS['success']
-            self.font_size = AppConfig.FONT_SIZE
-            self.font_name = FONT_MEDIUM
-        elif variant == 'error':
-            self.color = COLORS['error']
-            self.font_size = AppConfig.FONT_SIZE
-            self.font_name = FONT_MEDIUM
-        else:
-            self.font_name = FONT_NAME
+        variant_config = {
+            'primary': (COLORS['text_primary'], AppConfig.FONT_SIZE_LARGE, FONT_MEDIUM, True),
+            'secondary': (COLORS['text_secondary'], AppConfig.FONT_SIZE_SMALL, FONT_LIGHT, False),
+            'header': (COLORS['primary'], AppConfig.FONT_SIZE_HEADER, FONT_MEDIUM, True),
+            'success': (COLORS['success'], AppConfig.FONT_SIZE, FONT_MEDIUM, False),
+            'error': (COLORS['error'], AppConfig.FONT_SIZE, FONT_MEDIUM, False)
+        }
+        
+        if variant in variant_config:
+            self.color, self.font_size, self.font_name, self.bold = variant_config[variant]
         
         self.bind(size=self._update_text_size)
     
     def _update_text_size(self, *args):
         self.text_size = (self.width - AppConfig.PADDING * 2, None)
 
+# Оптимизированный TTS для Android
 class TextToSpeech:
-    """Синтезатор речи"""
-    
     def __init__(self):
         self._lock = threading.Lock()
-        
+        self._last_speak_time = 0
+        self._min_interval = 2  # Минимальный интервал между озвучиваниями
+    
     def speak_text(self, text: str, lang: str = 'ru'):
-        if not text:
+        if not text or not self._can_speak():
             return
-            
+        
+        current_time = time.time()
+        if current_time - self._last_speak_time < self._min_interval:
+            return
+        
+        self._last_speak_time = current_time
+        
         with self._lock:
             try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as f:
-                    audio_file = f.name
-                
-                tts = gTTS(text=text, lang=lang, slow=False)
-                tts.save(audio_file)
-                
-                if PLAYSOUND_AVAILABLE:
-                    playsound(audio_file)
-                else:
-                    if sys.platform == 'win32':
-                        os.system(f'start {audio_file}')
-                    elif sys.platform == 'darwin':
-                        os.system(f'afplay {audio_file}')
-                    else:
-                        os.system(f'ffplay -nodisp -autoexit {audio_file} 2>/dev/null')
-                
-                try:
-                    os.unlink(audio_file)
-                except:
-                    pass
+                if ANDROID_MEDIA and platform == 'android':
+                    # Оптимизированный способ для Android
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as f:
+                        audio_file = f.name
                     
+                    tts = gTTS(text=text, lang=lang, slow=False)
+                    tts.save(audio_file)
+                    
+                    try:
+                        media_player = MediaPlayer()
+                        media_player.setDataSource(audio_file)
+                        media_player.prepare()
+                        media_player.start()
+                        # Даем время на воспроизведение
+                        time.sleep(len(text) * 0.1 + 1)
+                        media_player.release()
+                    except:
+                        pass
+                    
+                    try:
+                        os.unlink(audio_file)
+                    except:
+                        pass
+                elif PLAYSOUND_AVAILABLE:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as f:
+                        audio_file = f.name
+                    tts = gTTS(text=text, lang=lang, slow=False)
+                    tts.save(audio_file)
+                    playsound(audio_file)
+                    try:
+                        os.unlink(audio_file)
+                    except:
+                        pass
             except Exception as e:
-                print(f"Ошибка озвучивания: {e}")
+                print(f"TTS Error: {e}")
+    
+    def _can_speak(self):
+        current_time = time.time()
+        return current_time - self._last_speak_time >= self._min_interval
     
     def stop_speaking(self):
         pass
 
+# Оптимизированный BarcodeReader с кэшированием
 class BarcodeReader:
-    """Класс для распознавания штрих-кодов и QR-кодов"""
-    
     def __init__(self, tts_callback: Optional[Callable] = None):
         self.tts_callback = tts_callback
+        self._last_detection = None
+        self._last_detection_time = 0
+        self._cooldown = 3
     
     def decode_barcodes(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict]]:
-        """Распознает штрих-коды и QR-коды в кадре"""
         result = frame.copy()
         detections = []
         
         try:
-            # Конвертируем OpenCV изображение в PIL
-            pil_image = PILImage.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            # Уменьшаем разрешение для скорости
+            h, w = frame.shape[:2]
+            if w > MAX_FRAME_WIDTH:
+                scale = MAX_FRAME_WIDTH / w
+                new_w = MAX_FRAME_WIDTH
+                new_h = int(h * scale)
+                small_frame = cv2.resize(frame, (new_w, new_h))
+            else:
+                small_frame = frame
             
-            # Декодируем все штрих-коды и QR-коды
+            pil_image = PILImage.fromarray(cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB))
             decoded_objects = zbar_decode(pil_image)
             
+            scale_factor = w / small_frame.shape[1] if w > MAX_FRAME_WIDTH else 1
+            
             for obj in decoded_objects:
-                # Получаем данные
-                barcode_data = obj.data.decode('utf-8')
+                barcode_data = obj.data.decode('utf-8', errors='ignore')
                 barcode_type = obj.type
                 
-                # Рисуем рамку вокруг кода
                 points = obj.polygon
                 if len(points) == 4:
-                    pts = np.array([(p.x, p.y) for p in points], np.int32)
+                    pts = np.array([(int(p.x * scale_factor), int(p.y * scale_factor)) 
+                                   for p in points], np.int32)
                     pts = pts.reshape((-1, 1, 2))
                     
-                    # Цвет в зависимости от типа
-                    color = COLORS['purple'][:3]  # RGB
-                    color = tuple(int(c * 255) for c in color)
+                    color = tuple(int(c * 255) for c in COLORS['purple'][:3])
+                    cv2.polylines(result, [pts], True, color, 2)
                     
-                    cv2.polylines(result, [pts], True, color, 3)
-                    
-                    # Добавляем текст
-                    display_text = f"{barcode_type}: {barcode_data[:20]}..."
-                    if len(barcode_data) <= 20:
-                        display_text = f"{barcode_type}: {barcode_data}"
-                    
+                    display_text = f"{barcode_type}"
                     cv2.putText(result, display_text, 
-                              (pts[0][0][0], pts[0][0][1] - 10),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                              (pts[0][0][0], pts[0][0][1] - 5),
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                     
                     detections.append({
                         'type': barcode_type,
@@ -404,164 +367,149 @@ class BarcodeReader:
                     })
         
         except Exception as e:
-            print(f"Ошибка распознавания кода: {e}")
+            pass
         
         return result, detections
     
     def speak_barcode(self, detections: List[Dict]):
-        """Озвучивает распознанные коды"""
         if not detections or not self.tts_callback:
             return
         
-        for detection in detections[:1]:  # Озвучиваем только первый код
+        current_time = time.time()
+        if current_time - self._last_detection_time < self._cooldown:
+            return
+        
+        for detection in detections[:1]:
             code_type = detection['type']
             code_data = detection['data']
             
             if code_type == 'QRCODE':
-                text = f"QR код: {code_data}"
+                text = f"QR код: {code_data[:50]}"
             else:
-                text = f"Штрих код: {code_data}"
+                text = f"Штрих код: {code_data[:50]}"
             
+            self._last_detection_time = current_time
             threading.Thread(target=self.tts_callback, args=(text,), daemon=True).start()
 
+# Оптимизированный CurrencyRecognizer
 class CurrencyRecognizer:
-    """Класс для распознавания номинала купюр"""
-    
-    # База данных купюр (можно расширить)
     CURRENCY_DB = {
         'rub': {
-            10: {'name': '10 рублей', 'color': 'зеленый', 'size': '150x65'},
-            50: {'name': '50 рублей', 'color': 'синий', 'size': '150x65'},
-            100: {'name': '100 рублей', 'color': 'коричневый', 'size': '150x65'},
-            200: {'name': '200 рублей', 'color': 'зеленый', 'size': '150x65'},
-            500: {'name': '500 рублей', 'color': 'фиолетовый', 'size': '150x65'},
-            1000: {'name': '1000 рублей', 'color': 'бирюзовый', 'size': '157x69'},
-            2000: {'name': '2000 рублей', 'color': 'синий', 'size': '157x69'},
-            5000: {'name': '5000 рублей', 'color': 'красный', 'size': '157x69'}
+            10: '10 рублей', 50: '50 рублей', 100: '100 рублей',
+            200: '200 рублей', 500: '500 рублей', 1000: '1000 рублей',
+            2000: '2000 рублей', 5000: '5000 рублей'
         },
         'usd': {
-            1: {'name': '1 доллар', 'color': 'зеленый', 'size': '156x66'},
-            2: {'name': '2 доллара', 'color': 'зеленый', 'size': '156x66'},
-            5: {'name': '5 долларов', 'color': 'фиолетовый', 'size': '156x66'},
-            10: {'name': '10 долларов', 'color': 'желтый', 'size': '156x66'},
-            20: {'name': '20 долларов', 'color': 'зеленый', 'size': '156x66'},
-            50: {'name': '50 долларов', 'color': 'розовый', 'size': '156x66'},
-            100: {'name': '100 долларов', 'color': 'зеленый', 'size': '156x66'}
+            1: '1 доллар', 2: '2 доллара', 5: '5 долларов',
+            10: '10 долларов', 20: '20 долларов', 50: '50 долларов',
+            100: '100 долларов'
         },
         'eur': {
-            5: {'name': '5 евро', 'color': 'серый', 'size': '120x62'},
-            10: {'name': '10 евро', 'color': 'красный', 'size': '127x67'},
-            20: {'name': '20 евро', 'color': 'синий', 'size': '133x72'},
-            50: {'name': '50 евро', 'color': 'оранжевый', 'size': '140x77'},
-            100: {'name': '100 евро', 'color': 'зеленый', 'size': '147x82'},
-            200: {'name': '200 евро', 'color': 'желтый', 'size': '153x82'},
-            500: {'name': '500 евро', 'color': 'фиолетовый', 'size': '160x82'}
+            5: '5 евро', 10: '10 евро', 20: '20 евро',
+            50: '50 евро', 100: '100 евро', 200: '200 евро',
+            500: '500 евро'
         }
     }
     
     def __init__(self, tts_callback: Optional[Callable] = None):
         self.tts_callback = tts_callback
-        self.currency_type = 'rub'  # По умолчанию рубли
+        self.currency_type = 'rub'
+        self._last_detection_time = 0
+        self._cooldown = 3
     
     def recognize_currency(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict]]:
-        """Распознает номинал купюры в кадре"""
         result = frame.copy()
         detections = []
         
         try:
-            # Упрощенное распознавание на основе цветов и размеров
+            # Быстрое обнаружение прямоугольников
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            edges = cv2.Canny(gray, 100, 200)
-            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            _, thresh = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, 
+                                          cv2.CHAIN_APPROX_SIMPLE)
             
             for contour in contours:
-                # Ищем прямоугольные области (потенциальные купюры)
-                peri = cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+                area = cv2.contourArea(contour)
+                if area < 5000:  # Минимальная площадь
+                    continue
                 
-                if len(approx) == 4:  # Прямоугольник
-                    x, y, w, h = cv2.boundingRect(contour)
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / min(w, h)
+                
+                if 1.5 < aspect_ratio < 3.0:
+                    # Быстрое определение цвета
+                    roi = frame[y:y+h, x:x+w]
+                    avg_color = np.mean(roi, axis=(0, 1))
                     
-                    # Проверяем соотношение сторон (примерно как у купюры)
-                    aspect_ratio = w / h if w > h else h / w
-                    
-                    if 1.5 < aspect_ratio < 3.0:  # Соотношение сторон купюры
-                        # Анализируем цвет в области купюры
-                        roi = frame[y:y+h, x:x+w]
-                        avg_color = cv2.mean(roi)[:3]
-                        
-                        # Определяем номинал (упрощенно)
-                        if self.currency_type == 'rub':
-                            if avg_color[2] > 150:  # Красноватый
-                                nominal = 5000
-                            elif avg_color[0] > 150:  # Синеватый
-                                nominal = 2000
-                            elif avg_color[1] > 150:  # Зеленоватый
-                                nominal = 100
-                            else:
-                                nominal = 500
+                    nominal = 100  # По умолчанию
+                    if self.currency_type == 'rub':
+                        if avg_color[2] > 150:
+                            nominal = 5000
+                        elif avg_color[0] > 150:
+                            nominal = 2000
+                        elif avg_color[1] > 150:
+                            nominal = 100
                         else:
-                            nominal = 100  # По умолчанию
+                            nominal = 500
+                    
+                    display_name = self.CURRENCY_DB.get(self.currency_type, {}).get(nominal, '')
+                    if display_name:
+                        color = tuple(int(c * 255) for c in COLORS['gold'][:3])
+                        cv2.rectangle(result, (x, y), (x + w, y + h), color, 2)
+                        cv2.putText(result, display_name, (x, y - 5),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                         
-                        # Ищем в базе данных
-                        currency_info = self.CURRENCY_DB.get(self.currency_type, {}).get(nominal)
-                        
-                        if currency_info:
-                            display_name = currency_info['name']
-                            color = COLORS['gold'][:3]
-                            color = tuple(int(c * 255) for c in color)
-                            
-                            cv2.rectangle(result, (x, y), (x + w, y + h), color, 3)
-                            cv2.putText(result, display_name, (x, y - 10),
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                            
-                            detections.append({
-                                'currency': self.currency_type,
-                                'nominal': nominal,
-                                'display_name': display_name,
-                                'bbox': (x, y, w, h)
-                            })
+                        detections.append({
+                            'currency': self.currency_type,
+                            'nominal': nominal,
+                            'display_name': display_name
+                        })
         
         except Exception as e:
-            print(f"Ошибка распознавания купюры: {e}")
+            pass
         
         return result, detections
     
     def set_currency(self, currency_type: str):
-        """Устанавливает тип валюты"""
         if currency_type in self.CURRENCY_DB:
             self.currency_type = currency_type
     
     def speak_currency(self, detection: Dict):
-        """Озвучивает распознанную купюру"""
         if detection and self.tts_callback:
-            text = f"Распознана купюра: {detection['display_name']}"
-            threading.Thread(target=self.tts_callback, args=(text,), daemon=True).start()
+            current_time = time.time()
+            if current_time - self._last_detection_time >= self._cooldown:
+                self._last_detection_time = current_time
+                text = f"Купюра: {detection['display_name']}"
+                threading.Thread(target=self.tts_callback, args=(text,), daemon=True).start()
 
+# Оптимизированный ObjectDetector
 class ObjectDetector:
-    """Детектор объектов"""
-    
     OBJECT_TEMPLATES = {
-        'crosswalk': ObjectTemplate('crosswalk', '🚶 Переход', 0.65, (0, 150, 0)),
-        'bus_stop': ObjectTemplate('bus_stop', '🚏 Остановка', 0.6, (150, 0, 0)),
-        'medical_cross': ObjectTemplate('medical_cross', '🏥 Крест', 0.7, (0, 0, 150))
+        'crosswalk': ObjectTemplate('crosswalk', 'Переход', 0.65, (0, 150, 0)),
+        'bus_stop': ObjectTemplate('bus_stop', 'Остановка', 0.6, (150, 0, 0)),
+        'medical_cross': ObjectTemplate('medical_cross', 'Крест', 0.7, (0, 0, 150))
     }
     
     def __init__(self, tts_callback: Optional[Callable] = None):
         self.templates: Dict[str, np.ndarray] = {}
         self.last_detected: Dict[str, float] = {}
         self.tts_callback = tts_callback
-        self.cooldown_time = 3
-        
+        self.cooldown_time = 5
+    
     def load_template(self, name: str, image_path: str) -> bool:
         if name not in self.OBJECT_TEMPLATES:
             return False
-            
+        
         try:
             template = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
             if template is not None:
+                # Уменьшаем размер шаблона для скорости
+                if template.shape[0] > 100 or template.shape[1] > 100:
+                    scale = min(100 / template.shape[0], 100 / template.shape[1])
+                    new_w = int(template.shape[1] * scale)
+                    new_h = int(template.shape[0] * scale)
+                    template = cv2.resize(template, (new_w, new_h))
                 self.templates[name] = template
-                print(f"✓ Загружен: {self.OBJECT_TEMPLATES[name].display_name}")
                 return True
         except:
             pass
@@ -569,7 +517,10 @@ class ObjectDetector:
     
     def load_default_templates(self) -> bool:
         if not os.path.exists(AppConfig.TEMPLATES_DIR):
-            os.makedirs(AppConfig.TEMPLATES_DIR)
+            try:
+                os.makedirs(AppConfig.TEMPLATES_DIR)
+            except:
+                pass
             return False
         
         loaded = 0
@@ -586,33 +537,44 @@ class ObjectDetector:
             return frame, []
         
         result = frame.copy()
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        h, w = frame.shape[:2]
+        
+        # Уменьшаем кадр для детекции
+        scale = min(MAX_FRAME_WIDTH / w, MAX_FRAME_HEIGHT / h, 1.0)
+        if scale < 1.0:
+            small_h, small_w = int(h * scale), int(w * scale)
+            small_frame = cv2.resize(frame, (small_w, small_h))
+            gray_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+        else:
+            gray_small = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            scale = 1.0
+        
         detections = []
         new_detections = []
         
         for obj_name, template in self.templates.items():
-            if gray.shape[0] < template.shape[0] or gray.shape[1] < template.shape[1]:
+            if gray_small.shape[0] < template.shape[0] or gray_small.shape[1] < template.shape[1]:
                 continue
             
-            match = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+            match = cv2.matchTemplate(gray_small, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(match)
             obj_template = self.OBJECT_TEMPLATES.get(obj_name)
             
             if obj_template and max_val > obj_template.threshold:
-                h, w = template.shape
+                # Масштабируем координаты обратно
+                x, y = int(max_loc[0] / scale), int(max_loc[1] / scale)
+                tw, th = int(template.shape[1] / scale), int(template.shape[0] / scale)
+                
                 detection = {
                     'name': obj_name,
                     'display_name': obj_template.display_name,
-                    'bbox': (max_loc, (max_loc[0] + w, max_loc[1] + h))
+                    'bbox': ((x, y), (x + tw, y + th))
                 }
                 detections.append(detection)
                 
-                # Рисуем рамку
-                cv2.rectangle(result, max_loc, (max_loc[0] + w, max_loc[1] + h), 
-                            obj_template.color, 3)
-                cv2.putText(result, obj_template.display_name, 
-                          (max_loc[0], max_loc[1] - 10),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, obj_template.color, 2)
+                cv2.rectangle(result, (x, y), (x + tw, y + th), obj_template.color, 2)
+                cv2.putText(result, obj_template.display_name, (x, y - 5),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.4, obj_template.color, 1)
                 
                 if self._should_speak(obj_name):
                     new_detections.append(detection)
@@ -620,7 +582,7 @@ class ObjectDetector:
         
         if new_detections and self.tts_callback:
             self._speak_detections(new_detections)
-            
+        
         return result, detections
     
     def _should_speak(self, obj_name: str) -> bool:
@@ -630,72 +592,79 @@ class ObjectDetector:
     
     def _speak_detections(self, detections: List[Dict]):
         if detections:
-            names = [d['display_name'].split(' ', 1)[1] for d in detections]
+            names = [d['display_name'] for d in detections]
             text = f"Обнаружен {names[0]}" if len(names) == 1 else f"Обнаружены: {', '.join(names)}"
             threading.Thread(target=self.tts_callback, args=(text,), daemon=True).start()
 
-class BarcodeTab(TabbedPanelItem):
-    """Вкладка распознавания штрих-кодов и QR-кодов"""
-    
-    def __init__(self, app, **kwargs):
+# Оптимизированные вкладки с общим кодом
+class BaseTab(TabbedPanelItem):
+    def __init__(self, app, tab_text, **kwargs):
         super().__init__(**kwargs)
         self.app = app
-        self.text = '📱 Коды'
+        self.text = tab_text
         self.is_active = False
+        self._update_interval = None
+    
+    def start_camera(self):
+        if not self.is_active and hasattr(self, 'update_frame'):
+            self.is_active = True
+            self._update_interval = Clock.schedule_interval(self.update_frame, AppConfig.FPS)
+    
+    def stop_camera(self):
+        if self.is_active and self._update_interval:
+            Clock.unschedule(self._update_interval)
+            self.is_active = False
+            if hasattr(self, 'image_widget'):
+                self.image_widget.texture = None
+            self._update_interval = None
+    
+    def on_leave(self):
+        self.stop_camera()
+
+class BarcodeTab(BaseTab):
+    def __init__(self, app, **kwargs):
+        super().__init__(app, '📱 Коды', **kwargs)
         self.auto_speak = False
         self.last_detection = None
-        
+        self._build_ui()
+    
+    def _build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=AppConfig.PADDING, spacing=AppConfig.SPACING)
         
         # Видео
-        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.4))
-        self.image_widget = Image(size_hint=(1, 1))
+        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.5))
+        self.image_widget = Image(size_hint=(1, 1), keep_ratio=True, allow_stretch=True)
         video_card.add_widget(self.image_widget)
         layout.add_widget(video_card)
         
         # Кнопки
-        buttons_card = ModernCard(orientation='vertical', size_hint=(1, 0.3))
-        btn_grid = BoxLayout(orientation='vertical', spacing=AppConfig.SPACING_SMALL)
+        btn_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(160), spacing=AppConfig.SPACING)
         
-        # Ряд 1
-        row1 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.camera_btn = StyledToggleButton(text='▶ Камера')
+        self.camera_btn = StyledToggleButton(text='▶ Камера', size_hint_y=None, height=dp(44))
         self.camera_btn.bind(on_press=self.toggle_camera)
-        self.scan_btn = StyledButton(text='📷 Сканировать', color_type='purple')
+        
+        self.scan_btn = StyledButton(text='📷 Сканировать', color_type='purple', size_hint_y=None, height=dp(44))
         self.scan_btn.bind(on_press=self.scan_barcode)
-        row1.add_widget(self.camera_btn)
-        row1.add_widget(self.scan_btn)
         
-        # Ряд 2
-        row2 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.speak_btn = StyledButton(text='🔊 Озвучить', color_type='success')
-        self.speak_btn.bind(on_press=self.speak_detection)
-        self.stop_btn = StyledButton(text='⏹ Стоп', color_type='warning')
-        self.stop_btn.bind(on_press=lambda x: self.app.tts.stop_speaking())
-        row2.add_widget(self.speak_btn)
-        row2.add_widget(self.stop_btn)
-        
-        # Ряд 3
-        row3 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.auto_btn = StyledToggleButton(text='🎤 Авто')
+        self.auto_btn = StyledToggleButton(text='🎤 Авто', size_hint_y=None, height=dp(44))
         self.auto_btn.bind(on_press=self.toggle_auto)
-        row3.add_widget(self.auto_btn)
         
-        btn_grid.add_widget(row1)
-        btn_grid.add_widget(row2)
-        btn_grid.add_widget(row3)
-        buttons_card.add_widget(btn_grid)
-        layout.add_widget(buttons_card)
+        btn_layout.add_widget(self.camera_btn)
+        btn_layout.add_widget(self.scan_btn)
+        btn_layout.add_widget(self.auto_btn)
+        layout.add_widget(btn_layout)
         
         # Результат
         result_card = ModernCard(orientation='vertical', size_hint=(1, 0.3))
         scroll = ScrollView()
         self.result_label = ModernLabel(
             variant='secondary',
-            text='📱 Наведите камеру на QR-код или штрих-код',
+            text='📱 Наведите на код',
             halign='center',
-            valign='middle'
+            valign='middle',
+            size_hint_y=None
         )
+        self.result_label.bind(texture_size=lambda lbl, ts: setattr(lbl, 'height', ts[1]))
         scroll.add_widget(self.result_label)
         result_card.add_widget(scroll)
         layout.add_widget(result_card)
@@ -714,32 +683,16 @@ class BarcodeTab(TabbedPanelItem):
         self.auto_speak = instance.state == 'down'
         instance.text = '🎤 Авто ВКЛ' if self.auto_speak else '🎤 Авто'
     
-    def start_camera(self):
-        if not self.is_active:
-            self.is_active = True
-            Clock.schedule_interval(self.update_frame, AppConfig.FPS)
-    
-    def stop_camera(self):
-        if self.is_active:
-            Clock.unschedule(self.update_frame)
-            self.is_active = False
-            self.image_widget.texture = None
-    
     def update_frame(self, dt):
         frame = self.app.get_current_frame()
         if frame is not None:
-            if self.auto_speak:
-                processed, detections = self.app.barcode_reader.decode_barcodes(frame)
-                if detections:
-                    self.last_detection = detections[0]
-                    self._update_result(detections[0])
+            processed, detections = self.app.barcode_reader.decode_barcodes(frame)
+            if detections:
+                self.last_detection = detections[0]
+                self.result_label.text = f"{detections[0]['type']}\n{detections[0]['data'][:50]}"
+                self.result_label.color = COLORS['purple']
+                if self.auto_speak:
                     self.app.barcode_reader.speak_barcode(detections)
-            else:
-                processed, detections = self.app.barcode_reader.decode_barcodes(frame)
-                if detections:
-                    self.last_detection = detections[0]
-                    self._update_result(detections[0])
-            
             self.app.display_frame(processed, self.image_widget)
     
     def scan_barcode(self, instance):
@@ -762,7 +715,7 @@ class BarcodeTab(TabbedPanelItem):
             Clock.schedule_once(lambda dt: self._update_error())
     
     def _update_result(self, detection):
-        self.result_label.text = f"{detection['type']}\n{detection['data']}"
+        self.result_label.text = f"{detection['type']}\n{detection['data'][:50]}"
         self.result_label.color = COLORS['purple']
     
     def _update_no_result(self):
@@ -770,89 +723,67 @@ class BarcodeTab(TabbedPanelItem):
         self.result_label.color = COLORS['error']
     
     def _update_error(self):
-        self.result_label.text = "⚠️ Ошибка сканирования"
+        self.result_label.text = "⚠️ Ошибка"
         self.result_label.color = COLORS['error']
-    
-    def speak_detection(self, instance):
-        if self.last_detection:
-            self.app.barcode_reader.speak_barcode([self.last_detection])
 
-class CurrencyTab(TabbedPanelItem):
-    """Вкладка распознавания купюр"""
-    
+class CurrencyTab(BaseTab):
     def __init__(self, app, **kwargs):
-        super().__init__(**kwargs)
-        self.app = app
-        self.text = '💰 Купюры'
-        self.is_active = False
+        super().__init__(app, '💰 Купюры', **kwargs)
         self.auto_speak = False
         self.last_detection = None
-        
+        self._build_ui()
+    
+    def _build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=AppConfig.PADDING, spacing=AppConfig.SPACING)
         
-        # Видео
-        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.35))
-        self.image_widget = Image(size_hint=(1, 1))
+        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.45))
+        self.image_widget = Image(size_hint=(1, 1), keep_ratio=True, allow_stretch=True)
         video_card.add_widget(self.image_widget)
         layout.add_widget(video_card)
         
         # Кнопки
-        buttons_card = ModernCard(orientation='vertical', size_hint=(1, 0.4))
-        btn_grid = BoxLayout(orientation='vertical', spacing=AppConfig.SPACING_SMALL)
+        btn_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(200), spacing=AppConfig.SPACING)
         
-        # Ряд 1
-        row1 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.camera_btn = StyledToggleButton(text='▶ Камера')
+        self.camera_btn = StyledToggleButton(text='▶ Камера', size_hint_y=None, height=dp(44))
         self.camera_btn.bind(on_press=self.toggle_camera)
-        self.recognize_btn = StyledButton(text='💰 Распознать', color_type='gold')
+        
+        self.recognize_btn = StyledButton(text='💰 Распознать', color_type='gold', size_hint_y=None, height=dp(44))
         self.recognize_btn.bind(on_press=self.recognize_currency)
-        row1.add_widget(self.camera_btn)
-        row1.add_widget(self.recognize_btn)
         
-        # Ряд 2
-        row2 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.speak_btn = StyledButton(text='🔊 Озвучить', color_type='success')
-        self.speak_btn.bind(on_press=self.speak_detection)
-        self.stop_btn = StyledButton(text='⏹ Стоп', color_type='warning')
-        self.stop_btn.bind(on_press=lambda x: self.app.tts.stop_speaking())
-        row2.add_widget(self.speak_btn)
-        row2.add_widget(self.stop_btn)
-        
-        # Ряд 3
-        row3 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.auto_btn = StyledToggleButton(text='🎤 Авто')
+        self.auto_btn = StyledToggleButton(text='🎤 Авто', size_hint_y=None, height=dp(44))
         self.auto_btn.bind(on_press=self.toggle_auto)
-        row3.add_widget(self.auto_btn)
         
-        # Ряд 4 - выбор валюты
-        row4 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT_SMALL)
-        self.rub_btn = StyledToggleButton(text='🇷🇺 RUB')
+        # Выбор валюты
+        currency_layout = BoxLayout(size_hint_y=None, height=dp(44), spacing=AppConfig.SPACING_SMALL)
+        self.rub_btn = StyledToggleButton(text='🇷🇺 RUB', size_hint_x=0.33, height=dp(40))
         self.rub_btn.state = 'down'
         self.rub_btn.bind(on_press=lambda x: self.set_currency('rub'))
-        self.usd_btn = StyledToggleButton(text='🇺🇸 USD')
+        self.usd_btn = StyledToggleButton(text='🇺🇸 USD', size_hint_x=0.33, height=dp(40))
         self.usd_btn.bind(on_press=lambda x: self.set_currency('usd'))
-        self.eur_btn = StyledToggleButton(text='🇪🇺 EUR')
+        self.eur_btn = StyledToggleButton(text='🇪🇺 EUR', size_hint_x=0.33, height=dp(40))
         self.eur_btn.bind(on_press=lambda x: self.set_currency('eur'))
-        row4.add_widget(self.rub_btn)
-        row4.add_widget(self.usd_btn)
-        row4.add_widget(self.eur_btn)
         
-        btn_grid.add_widget(row1)
-        btn_grid.add_widget(row2)
-        btn_grid.add_widget(row3)
-        btn_grid.add_widget(row4)
-        buttons_card.add_widget(btn_grid)
-        layout.add_widget(buttons_card)
+        currency_layout.add_widget(self.rub_btn)
+        currency_layout.add_widget(self.usd_btn)
+        currency_layout.add_widget(self.eur_btn)
+        
+        btn_layout.add_widget(self.camera_btn)
+        btn_layout.add_widget(self.recognize_btn)
+        btn_layout.add_widget(self.auto_btn)
+        btn_layout.add_widget(currency_layout)
+        layout.add_widget(btn_layout)
         
         # Результат
-        result_card = ModernCard(orientation='vertical', size_hint=(1, 0.25))
+        result_card = ModernCard(orientation='vertical', size_hint=(1, 0.3))
         scroll = ScrollView()
         self.result_label = ModernLabel(
             variant='secondary',
-            text='💰 Наведите камеру на купюру',
+            text='💰 Наведите на купюру',
             halign='center',
-            valign='middle'
+            valign='middle',
+            size_hint_y=None
         )
+        self.result_label.bind(texture_size=lambda lbl, ts: setattr(lbl, 'height', ts[1]))
         scroll.add_widget(self.result_label)
         result_card.add_widget(scroll)
         layout.add_widget(result_card)
@@ -877,24 +808,14 @@ class CurrencyTab(TabbedPanelItem):
         self.usd_btn.state = 'down' if currency_type == 'usd' else 'normal'
         self.eur_btn.state = 'down' if currency_type == 'eur' else 'normal'
     
-    def start_camera(self):
-        if not self.is_active:
-            self.is_active = True
-            Clock.schedule_interval(self.update_frame, AppConfig.FPS)
-    
-    def stop_camera(self):
-        if self.is_active:
-            Clock.unschedule(self.update_frame)
-            self.is_active = False
-            self.image_widget.texture = None
-    
     def update_frame(self, dt):
         frame = self.app.get_current_frame()
         if frame is not None:
             processed, detections = self.app.currency_recognizer.recognize_currency(frame)
             if detections:
                 self.last_detection = detections[0]
-                self._update_result(detections[0])
+                self.result_label.text = f"💰 {detections[0]['display_name']}"
+                self.result_label.color = COLORS['gold']
                 if self.auto_speak:
                     self.app.currency_recognizer.speak_currency(detections[0])
             self.app.display_frame(processed, self.image_widget)
@@ -927,61 +848,45 @@ class CurrencyTab(TabbedPanelItem):
         self.result_label.color = COLORS['error']
     
     def _update_error(self):
-        self.result_label.text = "⚠️ Ошибка распознавания"
+        self.result_label.text = "⚠️ Ошибка"
         self.result_label.color = COLORS['error']
-    
-    def speak_detection(self, instance):
-        if self.last_detection:
-            self.app.currency_recognizer.speak_currency(self.last_detection)
 
-class ObjectDetectionTab(TabbedPanelItem):
-    """Вкладка детектирования объектов"""
-    
+class ObjectDetectionTab(BaseTab):
     def __init__(self, app, **kwargs):
-        super().__init__(**kwargs)
-        self.app = app
-        self.text = '🎯 Детектор'
-        self.is_active = False
-        
+        super().__init__(app, '🎯 Детектор', **kwargs)
+        self._build_ui()
+    
+    def _build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=AppConfig.PADDING, spacing=AppConfig.SPACING)
         
         # Информация
-        info_card = ModernCard(orientation='vertical', size_hint_y=None, height=dp(80))
+        info_card = ModernCard(orientation='vertical', size_hint_y=None, height=dp(70))
         self.info_label = ModernLabel(variant='secondary', text='📁 Загрузите шаблоны', 
-                                     halign='center', valign='middle', size_hint_y=None, height=dp(40))
+                                     halign='center', size_hint_y=None, height=dp(35))
         self.status_label = ModernLabel(variant='success', text='✅ Готов', 
-                                       halign='center', valign='middle', size_hint_y=None, height=dp(40))
+                                       halign='center', size_hint_y=None, height=dp(35))
         info_card.add_widget(self.info_label)
         info_card.add_widget(self.status_label)
         layout.add_widget(info_card)
         
         # Видео
-        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.45))
-        self.image_widget = Image(size_hint=(1, 1))
+        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.55))
+        self.image_widget = Image(size_hint=(1, 1), keep_ratio=True, allow_stretch=True)
         video_card.add_widget(self.image_widget)
         layout.add_widget(video_card)
         
         # Кнопки
-        buttons_card = ModernCard(orientation='vertical', size_hint_y=None, height=dp(130))
-        btn_grid = BoxLayout(orientation='vertical', spacing=AppConfig.SPACING_SMALL)
+        btn_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(100), spacing=AppConfig.SPACING)
         
-        row1 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.btn_load = StyledButton(text='📁 Шаблоны')
+        self.btn_load = StyledButton(text='📁 Шаблоны', size_hint_y=None, height=dp(44))
         self.btn_load.bind(on_press=self.app.show_template_loader)
-        self.btn_camera = StyledToggleButton(text='▶ Камера')
+        
+        self.btn_camera = StyledToggleButton(text='▶ Камера', size_hint_y=None, height=dp(44))
         self.btn_camera.bind(on_press=self.toggle_camera)
-        row1.add_widget(self.btn_load)
-        row1.add_widget(self.btn_camera)
         
-        row2 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.btn_speak = StyledButton(text='🔊 Озвучить', color_type='success')
-        self.btn_speak.bind(on_press=self.speak_detections)
-        row2.add_widget(self.btn_speak)
-        
-        btn_grid.add_widget(row1)
-        btn_grid.add_widget(row2)
-        buttons_card.add_widget(btn_grid)
-        layout.add_widget(buttons_card)
+        btn_layout.add_widget(self.btn_load)
+        btn_layout.add_widget(self.btn_camera)
+        layout.add_widget(btn_layout)
         
         self.content = layout
     
@@ -992,17 +897,6 @@ class ObjectDetectionTab(TabbedPanelItem):
         else:
             self.stop_camera()
             instance.text = '▶ Камера'
-    
-    def start_camera(self):
-        if not self.is_active:
-            self.is_active = True
-            Clock.schedule_interval(self.update_frame, AppConfig.FPS)
-    
-    def stop_camera(self):
-        if self.is_active:
-            Clock.unschedule(self.update_frame)
-            self.is_active = False
-            self.image_widget.texture = None
     
     def update_frame(self, dt):
         frame = self.app.get_current_frame()
@@ -1022,60 +916,38 @@ class ObjectDetectionTab(TabbedPanelItem):
                 self.status_label.color = COLORS['text_secondary']
             
             self.app.display_frame(processed, self.image_widget)
-    
-    def speak_detections(self, instance):
-        if hasattr(self.app, 'last_detections') and self.app.last_detections:
-            self.app.detector._speak_detections(self.app.last_detections)
 
-class OCRTab(TabbedPanelItem):
-    """Вкладка распознавания текста"""
-    
+class OCRTab(BaseTab):
     def __init__(self, app, **kwargs):
-        super().__init__(**kwargs)
-        self.app = app
-        self.text = '📝 OCR'
-        self.is_active = False
+        super().__init__(app, '📝 OCR', **kwargs)
         self.last_text = ""
         self.auto_speak = False
-        
+        self._build_ui()
+    
+    def _build_ui(self):
         layout = BoxLayout(orientation='vertical', padding=AppConfig.PADDING, spacing=AppConfig.SPACING)
         
-        # Видео
-        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.4))
-        self.image_widget = Image(size_hint=(1, 1))
+        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.5))
+        self.image_widget = Image(size_hint=(1, 1), keep_ratio=True, allow_stretch=True)
         video_card.add_widget(self.image_widget)
         layout.add_widget(video_card)
         
         # Кнопки
-        buttons_card = ModernCard(orientation='vertical', size_hint=(1, 0.3))
-        btn_grid = BoxLayout(orientation='vertical', spacing=AppConfig.SPACING_SMALL)
+        btn_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(150), spacing=AppConfig.SPACING)
         
-        row1 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.camera_btn = StyledToggleButton(text='▶ Камера')
+        self.camera_btn = StyledToggleButton(text='▶ Камера', size_hint_y=None, height=dp(44))
         self.camera_btn.bind(on_press=self.toggle_camera)
-        self.recognize_btn = StyledButton(text='📷 Распознать')
+        
+        self.recognize_btn = StyledButton(text='📷 Распознать', size_hint_y=None, height=dp(44))
         self.recognize_btn.bind(on_press=self.capture_and_recognize)
-        row1.add_widget(self.camera_btn)
-        row1.add_widget(self.recognize_btn)
         
-        row2 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.speak_btn = StyledButton(text='🔊 Озвучить', color_type='success')
-        self.speak_btn.bind(on_press=self.speak_text)
-        self.stop_btn = StyledButton(text='⏹ Стоп', color_type='warning')
-        self.stop_btn.bind(on_press=lambda x: self.app.tts.stop_speaking())
-        row2.add_widget(self.speak_btn)
-        row2.add_widget(self.stop_btn)
-        
-        row3 = BoxLayout(spacing=AppConfig.SPACING_SMALL, size_hint_y=None, height=AppConfig.BUTTON_HEIGHT)
-        self.auto_btn = StyledToggleButton(text='🎤 Авто')
+        self.auto_btn = StyledToggleButton(text='🎤 Авто', size_hint_y=None, height=dp(44))
         self.auto_btn.bind(on_press=self.toggle_auto)
-        row3.add_widget(self.auto_btn)
         
-        btn_grid.add_widget(row1)
-        btn_grid.add_widget(row2)
-        btn_grid.add_widget(row3)
-        buttons_card.add_widget(btn_grid)
-        layout.add_widget(buttons_card)
+        btn_layout.add_widget(self.camera_btn)
+        btn_layout.add_widget(self.recognize_btn)
+        btn_layout.add_widget(self.auto_btn)
+        layout.add_widget(btn_layout)
         
         # Результат
         result_card = ModernCard(orientation='vertical', size_hint=(1, 0.3))
@@ -1084,8 +956,10 @@ class OCRTab(TabbedPanelItem):
             variant='secondary',
             text='📄 Текст будет здесь',
             halign='center',
-            valign='middle'
+            valign='middle',
+            size_hint_y=None
         )
+        self.result_label.bind(texture_size=lambda lbl, ts: setattr(lbl, 'height', ts[1]))
         scroll.add_widget(self.result_label)
         result_card.add_widget(scroll)
         layout.add_widget(result_card)
@@ -1104,17 +978,6 @@ class OCRTab(TabbedPanelItem):
         self.auto_speak = instance.state == 'down'
         instance.text = '🎤 Авто ВКЛ' if self.auto_speak else '🎤 Авто'
     
-    def start_camera(self):
-        if not self.is_active:
-            self.is_active = True
-            Clock.schedule_interval(self.update_frame, AppConfig.FPS)
-    
-    def stop_camera(self):
-        if self.is_active:
-            Clock.unschedule(self.update_frame)
-            self.is_active = False
-            self.image_widget.texture = None
-    
     def update_frame(self, dt):
         frame = self.app.get_current_frame()
         if frame is not None:
@@ -1129,19 +992,28 @@ class OCRTab(TabbedPanelItem):
     
     def _recognize(self, frame):
         try:
+            # Оптимизация для скорости
+            h, w = frame.shape[:2]
+            if w > MAX_FRAME_WIDTH:
+                scale = MAX_FRAME_WIDTH / w
+                new_w = MAX_FRAME_WIDTH
+                new_h = int(h * scale)
+                frame = cv2.resize(frame, (new_w, new_h))
+            
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             gray = cv2.equalizeHist(gray)
             
-            results = self.app.reader.readtext(gray, paragraph=True)
+            results = self.app.reader.readtext(gray, paragraph=True, 
+                                             width_ths=0.7, height_ths=0.7)
             texts = [text for (_, text, prob) in results if prob > AppConfig.OCR_CONFIDENCE_THRESHOLD]
             
             if texts:
-                result = "📝 " + " ".join(texts)
+                result = "📝 " + " ".join(texts)[:200]
                 color = COLORS['success']
                 if self.auto_speak:
                     threading.Thread(
                         target=self.app.tts.speak_text,
-                        args=(f"Распознано: {result[2:]}",),
+                        args=(f"Текст: {result[2:50]}",),
                         daemon=True
                     ).start()
             else:
@@ -1156,39 +1028,28 @@ class OCRTab(TabbedPanelItem):
         self.result_label.text = text
         self.result_label.color = color
         self.last_text = text
-    
-    def speak_text(self, instance):
-        if self.last_text and "❌" not in self.last_text and "⚠️" not in self.last_text:
-            clean = self.last_text.replace("📝 ", "")
-            threading.Thread(target=self.app.tts.speak_text, args=(clean,), daemon=True).start()
 
 class TemplateLoaderPopup(Popup):
-    """Попап загрузки шаблонов"""
-    
     def __init__(self, detector, callback, **kwargs):
         super().__init__(**kwargs)
         self.detector = detector
         self.callback = callback
         self.title = "📁 Загрузка шаблона"
-        self.size_hint = (0.95, 0.9)
+        self.size_hint = (0.9, 0.8)
         
         layout = BoxLayout(orientation='vertical', padding=AppConfig.PADDING, spacing=AppConfig.SPACING)
         
-        # Заголовок
-        title_label = ModernLabel(variant='header', text="Выберите тип объекта:", 
-                                 halign='center', size_hint_y=None, height=dp(50))
+        title_label = ModernLabel(variant='header', text="Выберите тип:", 
+                                 halign='center', size_hint_y=None, height=dp(40))
         layout.add_widget(title_label)
         
-        # Выбранный тип
         self.type_label = ModernLabel(variant='secondary', text="❌ Не выбран", 
-                                     halign='center', size_hint_y=None, height=dp(40))
+                                     halign='center', size_hint_y=None, height=dp(30))
         layout.add_widget(self.type_label)
         
         # Кнопки выбора
         for obj_id, obj_template in ObjectDetector.OBJECT_TEMPLATES.items():
-            btn = StyledButton(text=obj_template.display_name)
-            btn.size_hint_y = None
-            btn.height = dp(48)
+            btn = StyledButton(text=obj_template.display_name, size_hint_y=None, height=dp(40))
             btn.obj_id = obj_id
             btn.bind(on_press=self.select_type)
             layout.add_widget(btn)
@@ -1200,11 +1061,11 @@ class TemplateLoaderPopup(Popup):
         )
         layout.add_widget(self.filechooser)
         
-        # Кнопки действий
-        btn_layout = BoxLayout(size_hint_y=None, height=AppConfig.BUTTON_HEIGHT, spacing=AppConfig.SPACING)
-        load_btn = StyledButton(text='✅ Загрузить', color_type='success')
+        # Кнопки
+        btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=AppConfig.SPACING)
+        load_btn = StyledButton(text='✅ Загрузить', color_type='success', size_hint_x=0.5)
         load_btn.bind(on_press=self.load_template)
-        cancel_btn = StyledButton(text='❌ Отмена', color_type='warning')
+        cancel_btn = StyledButton(text='❌ Отмена', color_type='warning', size_hint_x=0.5)
         cancel_btn.bind(on_press=self.dismiss)
         btn_layout.add_widget(load_btn)
         btn_layout.add_widget(cancel_btn)
@@ -1226,25 +1087,28 @@ class TemplateLoaderPopup(Popup):
                 self.dismiss()
 
 class CameraApp(TabbedPanel):
-    """Основное приложение"""
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.do_default_tab = False
         self.tab_width = Window.width / 4
-        self.tab_height = dp(60)
+        self.tab_height = dp(50)
         
         # Компоненты
         self.tts = TextToSpeech()
         self.detector = ObjectDetector(tts_callback=self.tts.speak_text)
         self.barcode_reader = BarcodeReader(tts_callback=self.tts.speak_text)
         self.currency_recognizer = CurrencyRecognizer(tts_callback=self.tts.speak_text)
-        self.reader = easyocr.Reader(['ru', 'en'], gpu=False)
+        
+        # Инициализация EasyOCR в фоне
+        self.reader = None
+        self._init_ocr()
         
         # Переменные
         self.capture = None
         self.test_mode = False
         self.last_detections = []
+        self._frame_lock = threading.Lock()
+        self._last_frame = None
         
         # Вкладки
         self.detection_tab = ObjectDetectionTab(self)
@@ -1258,17 +1122,30 @@ class CameraApp(TabbedPanel):
         self.add_widget(self.currency_tab)
         
         # Инициализация
-        self._init_camera()
-        self._init_templates()
+        Clock.schedule_once(lambda dt: self._init_camera(), 0)
+        Clock.schedule_once(lambda dt: self._init_templates(), 1)
+        
+        # Очистка памяти
+        Clock.schedule_interval(lambda dt: gc.collect(), 30)
+    
+    def _init_ocr(self):
+        def load_ocr():
+            try:
+                self.reader = easyocr.Reader(['ru', 'en'], gpu=False)
+            except:
+                self.reader = None
+        
+        threading.Thread(target=load_ocr, daemon=True).start()
     
     def _init_camera(self):
         try:
             self.capture = cv2.VideoCapture(AppConfig.CAMERA_ID)
-            if platform in ['android', 'ios']:
-                self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            if platform == 'android':
+                self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, MAX_FRAME_WIDTH)
+                self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, MAX_FRAME_HEIGHT)
+                self.capture.set(cv2.CAP_PROP_FPS, 15)
             
-            if not self.capture.isOpened():
+            if not self.capture or not self.capture.isOpened():
                 raise Exception()
             self.test_mode = False
         except:
@@ -1284,27 +1161,30 @@ class CameraApp(TabbedPanel):
     
     def get_current_frame(self):
         if self.test_mode:
-            frame = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(frame, "📷 КАМЕРА НЕ НАЙДЕНА", (120, 240),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            return frame
+            return np.zeros((MAX_FRAME_HEIGHT, MAX_FRAME_WIDTH, 3), dtype=np.uint8)
         
         if self.capture and self.capture.isOpened():
             ret, frame = self.capture.read()
             if ret:
+                with self._frame_lock:
+                    self._last_frame = frame
                 return frame
-        return None
+        return self._last_frame
     
     @staticmethod
     def display_frame(frame, widget):
         try:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w = rgb.shape[:2]
-            max_w = int(Window.width * 0.9)
-            if w > max_w:
-                scale = max_w / w
-                rgb = cv2.resize(rgb, (max_w, int(h * scale)))
+            if frame is None:
+                return
             
+            h, w = frame.shape[:2]
+            if w > MAX_FRAME_WIDTH:
+                scale = MAX_FRAME_WIDTH / w
+                new_w = MAX_FRAME_WIDTH
+                new_h = int(h * scale)
+                frame = cv2.resize(frame, (new_w, new_h))
+            
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             texture = Texture.create(size=(rgb.shape[1], rgb.shape[0]), colorfmt='rgb')
             texture.blit_buffer(cv2.flip(rgb, 0).tobytes(), colorfmt='rgb', bufferfmt='ubyte')
             widget.texture = texture
@@ -1328,37 +1208,17 @@ class CameraApp(TabbedPanel):
             self.capture.release()
 
 class MainApp(App):
-    """Главное приложение"""
-    
     def build(self):
-        self.title = "🎯 Vision Assist"
-        if platform not in ['android', 'ios']:
-            Window.size = (dp(400), dp(750))
+        self.title = "Vision Assist"
+        if platform == 'android':
+            from android.config import ACTIVE_CLASS_NAME
         return CameraApp()
 
 if __name__ == '__main__':
-    print("\n" + "="*50)
-    print("🎯 VISION ASSIST")
-    print("="*50)
-    print("\n✨ Современный интерфейс с системными шрифтами")
-    print("🎯 Детектирование объектов")
-    print("📝 Распознавание текста (OCR)")
-    print("📱 Распознавание QR и штрих-кодов")
-    print("💰 Распознавание номинала купюр")
-    print("🔊 Озвучивание всех результатов")
-    print("\n📁 Папка 'templates' для шаблонов")
-    print("="*50 + "\n")
-    
-    if not PLAYSOUND_AVAILABLE:
-        print("⚠️ Для лучшего воспроизведения звука установите playsound:")
-        print("   pip install playsound")
-        print()
+    print("🎯 Vision Assist для Android")
+    print("="*30)
     
     try:
         MainApp().run()
     except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
-        import traceback
-        traceback.print_exc()
-        if platform not in ['android', 'ios']:
-            input("\nНажмите Enter...")
+        print(f"❌ Ошибка: {e}")
