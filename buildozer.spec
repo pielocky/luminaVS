@@ -34,6 +34,72 @@ android.recipes = numpy, opencv
 # Увеличиваем время сборки
 android.timeout = 3600
 
+# ===== НАСТРОЙКИ ДЛЯ СКАЧИВАНИЯ С РОССИЙСКИХ ЗЕРКАЛ =====
+# Предварительная загрузка numpy с российских зеркал
+pre-build = 
+    # Создаем директорию для кеша
+    mkdir -p ~/.buildozer/android/packages/numpy/
+    mkdir -p ~/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/
+    
+    # Скачиваем numpy с Яндекс зеркала (самое быстрое в РФ)
+    echo "Скачиваем numpy с Яндекс зеркала..."
+    wget --timeout=30 --tries=3 https://mirror.yandex.ru/pypi/packages/source/n/numpy/numpy-1.23.5.tar.gz \
+         -O ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz || \
+    wget --timeout=30 --tries=3 https://mirror.sbercloud.ru/pypi/packages/source/n/numpy/numpy-1.23.5.tar.gz \
+         -O ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz || \
+    wget --timeout=30 --tries=3 https://mirror.selectel.org/pypi/packages/source/n/numpy/numpy-1.23.5.tar.gz \
+         -O ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz
+    
+    # Создаем маркерный файл
+    touch ~/.buildozer/android/packages/numpy/.mark-numpy-1.23.5.tar.gz
+    
+    # Создаем кастомный рецепт numpy, который использует локальный файл
+    cat > ~/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/__init__.py << 'EOF'
+from pythonforandroid.recipe import PythonRecipe
+import shutil
+import os
+from pythonforandroid.logger import info
+
+class NumpyRecipe(PythonRecipe):
+    version = '1.23.5'
+    url = 'https://mirror.yandex.ru/pypi/packages/source/n/numpy/numpy-{version}.tar.gz'
+    depends = ['setuptools']
+    
+    def download_file(self, url, target, cwd=None):
+        # Используем локальный файл из кеша
+        cached_file = os.path.expanduser(f'~/.buildozer/android/packages/numpy/numpy-{self.version}.tar.gz')
+        if os.path.exists(cached_file):
+            info(f"Using cached numpy from {cached_file}")
+            shutil.copyfile(cached_file, target)
+            return True
+        else:
+            info(f"Downloading numpy from mirror")
+            super().download_file(url, target, cwd)
+    
+    def get_recipe_dir(self):
+        return os.path.dirname(__file__)
+
+recipe = NumpyRecipe()
+EOF
+
+    # Патчим python-for-android для использования правильных URL
+    find .buildozer/android/platform/python-for-android -type f -name "*.py" -exec sed -i 's/pypi.python.org/mirror.yandex.ru/g' {} \; 2>/dev/null || true
+    find .buildozer/android/platform/python-for-android -type f -name "*.py" -exec sed -i 's/packages.python.org/mirror.yandex.ru/g' {} \; 2>/dev/null || true
+
+# Настройки pip для использования российских зеркал
+pre-build2 = 
+    mkdir -p ~/.pip
+    cat > ~/.pip/pip.conf << EOF
+[global]
+index-url = https://mirror.yandex.ru/pypi/simple
+trusted-host = mirror.yandex.ru
+EOF
+
+# Очистка кеша если нужно
+clean = 
+    rm -rf ~/.buildozer/android/packages/numpy/
+    rm -rf ./.buildozer/android/platform/build-arm64-v8a/packages/numpy
+
 [buildozer]
 log_level = 2
 warn_on_root = 1
