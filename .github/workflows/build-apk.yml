@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # Важно: используем Ubuntu 20.04
+    runs-on: ubuntu-22.04  # Важно: используем Ubuntu 22.04, а не 24.04
     
     steps:
     - uses: actions/checkout@v3
@@ -16,9 +16,9 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'  # Используем Python 3.9
+        python-version: '3.9'
         
-    - name: Install dependencies
+    - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -26,18 +26,20 @@ jobs:
           wget \
           unzip \
           zip \
-          openjdk-11-jdk \
+          openjdk-17-jdk \
           autoconf \
           libtool \
           pkg-config \
           zlib1g-dev \
           libncurses5-dev \
           libncursesw5-dev \
-          libtinfo5 \
           cmake \
           libffi-dev \
           libssl-dev \
-          gettext  # Важно: устанавливаем gettext
+          gettext \
+          libltdl-dev \
+          python3-pip \
+          python3-dev
         
     - name: Install Python packages
       run: |
