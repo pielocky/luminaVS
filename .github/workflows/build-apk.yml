@@ -2,122 +2,54 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
+  workflow_dispatch:  # позволяет запускать вручную
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.8'
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt update
-          sudo apt install -y \
-            git zip unzip openjdk-17-jdk \
-            python3-pip autoconf libtool \
-            pkg-config zlib1g-dev libncurses5-dev \
-            libncursesw5-dev libtinfo5 cmake \
-            libffi-dev libssl-dev curl ca-certificates
-          
+          sudo apt install -y git zip unzip openjdk-11-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
           pip install --upgrade pip
-          pip install buildozer cython pillow
+          pip install buildozer cython
 
-      - name: Setup Android SDK and NDK from GitHub runner
+      - name: Install Android SDK dependencies
         run: |
-          # Используем предустановленный NDK на GitHub Actions
-          echo "ANDROID_NDK=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
-          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          
-          # Создаем символические ссылки для buildozer
-          mkdir -p ~/.buildozer/android/platform
-          ln -sf /usr/local/lib/android/sdk ~/.buildozer/android/platform/android-sdk
-          ln -sf /usr/local/lib/android/sdk/ndk/25.2.9519653 ~/.buildozer/android/platform/android-ndk
-          
-          # Проверяем наличие NDK
-          ls -la ~/.buildozer/android/platform/
+          sudo apt install -y libc6:i386 libncurses5:i386 libstdc++6:i386 lib32z1 libbz2-1.0:i386
+          # Устанавливаем дополнительные пакеты для сборки opencv и других
+          sudo apt install -y libgl1-mesa-dev libgles2-mesa-dev
 
-      - name: Pre-download numpy from GitHub releases
+      - name: Cache Buildozer dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.buildozer
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
+
+      - name: Build with Buildozer
         run: |
-          # Создаем директорию для numpy
-          mkdir -p ~/.buildozer/android/packages/numpy/
-          
-          # Скачиваем numpy с GitHub releases
-          echo "Скачиваем numpy с GitHub releases..."
-          
-          curl -L -H "User-Agent: Mozilla/5.0" \
-               --connect-timeout 30 \
-               --retry 3 \
-               https://github.com/numpy/numpy/releases/download/v1.23.5/numpy-1.23.5.tar.gz \
-               -o ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz
-          
-          # Проверяем, что файл скачан
-          if [ -f ~/.buildozer/android/packages/numpy/numpy-1.23.5.tar.gz ]; then
-            echo "✅ numpy успешно скачан с GitHub"
-            ls -la ~/.buildozer/android/packages/numpy/
-            # Создаем маркерный файл
-            touch ~/.buildozer/android/packages/numpy/.mark-numpy-1.23.5.tar.gz
-          else
-            echo "❌ Ошибка скачивания numpy"
-            exit 1
-          fi
-
-      - name: Create custom numpy recipe
-        run: |
-          # Создаем кастомный рецепт для numpy
-          mkdir -p ~/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/
-          
-          cat > ~/.buildozer/android/platform/python-for-android/pythonforandroid/recipes/numpy/__init__.py << 'EOF'
-from pythonforandroid.recipe import PythonRecipe
-import shutil
-import os
-from pythonforandroid.logger import info
-
-class NumpyRecipe(PythonRecipe):
-    version = '1.23.5'
-    url = 'https://github.com/numpy/numpy/releases/download/v{version}/numpy-{version}.tar.gz'
-    depends = ['setuptools']
-    
-    def download_file(self, url, target, cwd=None):
-        cached_file = os.path.expanduser(f'~/.buildozer/android/packages/numpy/numpy-{self.version}.tar.gz')
-        if os.path.exists(cached_file):
-            info(f"Using cached numpy from {cached_file}")
-            shutil.copyfile(cached_file, target)
-            return True
-        else:
-            info(f"Downloading numpy from GitHub releases")
-            super().download_file(url, target, cwd)
-
-recipe = NumpyRecipe()
-EOF
-
-      - name: Configure pip for reliable sources
-        run: |
-          mkdir -p ~/.pip
-          cat > ~/.pip/pip.conf << EOF
-[global]
-index-url = https://pypi.org/simple
-trusted-host = pypi.org
-EOF
-
-      - name: Build with buildozer
-        run: |
-          # Настраиваем переменные окружения
-          export ANDROID_NDK=/usr/local/lib/android/sdk/ndk/25.2.9519653
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          
-          # Очищаем старые сборки
-          buildozer android clean
-          
-          # Запускаем сборку
+          # Создаём директорию templates, если её нет (чтобы избежать ошибок при сборке)
+          mkdir -p templates
+          # Запускаем сборку (первый раз скачает всё необходимое, может занять >30 мин)
           buildozer android debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-assist-apk
+          path: bin/*.apk
