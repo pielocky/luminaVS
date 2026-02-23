@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import easyocr
 import os
 import threading
 from kivy.app import App
@@ -922,112 +921,17 @@ class OCRTab(BaseTab):
         super().__init__(app, '📝 OCR', **kwargs)
         self.last_text = ""
         self.auto_speak = False
+        # Убираем self.reader
         self._build_ui()
     
-    def _build_ui(self):
-        layout = BoxLayout(orientation='vertical', padding=AppConfig.PADDING, spacing=AppConfig.SPACING)
-        
-        video_card = ModernCard(orientation='vertical', size_hint=(1, 0.5))
-        self.image_widget = Image(size_hint=(1, 1), keep_ratio=True, allow_stretch=True)
-        video_card.add_widget(self.image_widget)
-        layout.add_widget(video_card)
-        
-        # Кнопки
-        btn_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(150), spacing=AppConfig.SPACING)
-        
-        self.camera_btn = StyledToggleButton(text='▶ Камера', size_hint_y=None, height=dp(44))
-        self.camera_btn.bind(on_press=self.toggle_camera)
-        
-        self.recognize_btn = StyledButton(text='📷 Распознать', size_hint_y=None, height=dp(44))
-        self.recognize_btn.bind(on_press=self.capture_and_recognize)
-        
-        self.auto_btn = StyledToggleButton(text='🎤 Авто', size_hint_y=None, height=dp(44))
-        self.auto_btn.bind(on_press=self.toggle_auto)
-        
-        btn_layout.add_widget(self.camera_btn)
-        btn_layout.add_widget(self.recognize_btn)
-        btn_layout.add_widget(self.auto_btn)
-        layout.add_widget(btn_layout)
-        
-        # Результат
-        result_card = ModernCard(orientation='vertical', size_hint=(1, 0.3))
-        scroll = ScrollView()
-        self.result_label = ModernLabel(
-            variant='secondary',
-            text='📄 Текст будет здесь',
-            halign='center',
-            valign='middle',
-            size_hint_y=None
-        )
-        self.result_label.bind(texture_size=lambda lbl, ts: setattr(lbl, 'height', ts[1]))
-        scroll.add_widget(self.result_label)
-        result_card.add_widget(scroll)
-        layout.add_widget(result_card)
-        
-        self.content = layout
-    
-    def toggle_camera(self, instance):
-        if instance.state == 'down':
-            self.start_camera()
-            instance.text = '⏹ Стоп'
-        else:
-            self.stop_camera()
-            instance.text = '▶ Камера'
-    
-    def toggle_auto(self, instance):
-        self.auto_speak = instance.state == 'down'
-        instance.text = '🎤 Авто ВКЛ' if self.auto_speak else '🎤 Авто'
-    
-    def update_frame(self, dt):
-        frame = self.app.get_current_frame()
-        if frame is not None:
-            self.app.display_frame(frame, self.image_widget)
-    
     def capture_and_recognize(self, instance):
-        frame = self.app.get_current_frame()
-        if frame is not None:
-            self.result_label.text = "⏳ Распознавание..."
-            self.result_label.color = COLORS['text_secondary']
-            threading.Thread(target=self._recognize, args=(frame.copy(),), daemon=True).start()
+        # Вместо OCR просто показываем сообщение
+        self.result_label.text = "❌ OCR недоступен в этой сборке"
+        self.result_label.color = COLORS['error']
+        if self.auto_speak:
+            threading.Thread(target=self.app.tts.speak_text, args=("OCR не работает",), daemon=True).start()
     
-    def _recognize(self, frame):
-        try:
-            # Оптимизация для скорости
-            h, w = frame.shape[:2]
-            if w > MAX_FRAME_WIDTH:
-                scale = MAX_FRAME_WIDTH / w
-                new_w = MAX_FRAME_WIDTH
-                new_h = int(h * scale)
-                frame = cv2.resize(frame, (new_w, new_h))
-            
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.equalizeHist(gray)
-            
-            results = self.app.reader.readtext(gray, paragraph=True, 
-                                             width_ths=0.7, height_ths=0.7)
-            texts = [text for (_, text, prob) in results if prob > AppConfig.OCR_CONFIDENCE_THRESHOLD]
-            
-            if texts:
-                result = "📝 " + " ".join(texts)[:200]
-                color = COLORS['success']
-                if self.auto_speak:
-                    threading.Thread(
-                        target=self.app.tts.speak_text,
-                        args=(f"Текст: {result[2:50]}",),
-                        daemon=True
-                    ).start()
-            else:
-                result = "❌ Текст не найден"
-                color = COLORS['error']
-            
-            Clock.schedule_once(lambda dt: self._update_result(result, color))
-        except:
-            Clock.schedule_once(lambda dt: self._update_result("⚠️ Ошибка", COLORS['error']))
-    
-    def _update_result(self, text, color):
-        self.result_label.text = text
-        self.result_label.color = color
-        self.last_text = text
+    # Остальные методы оставить как есть (update_frame и т.д.)
 
 class TemplateLoaderPopup(Popup):
     def __init__(self, detector, callback, **kwargs):
@@ -1101,7 +1005,6 @@ class CameraApp(TabbedPanel):
         
         # Инициализация EasyOCR в фоне
         self.reader = None
-        self._init_ocr()
         
         # Переменные
         self.capture = None
@@ -1128,14 +1031,6 @@ class CameraApp(TabbedPanel):
         # Очистка памяти
         Clock.schedule_interval(lambda dt: gc.collect(), 30)
     
-    def _init_ocr(self):
-        def load_ocr():
-            try:
-                self.reader = easyocr.Reader(['ru', 'en'], gpu=False)
-            except:
-                self.reader = None
-        
-        threading.Thread(target=load_ocr, daemon=True).start()
     
     def _init_camera(self):
         try:
